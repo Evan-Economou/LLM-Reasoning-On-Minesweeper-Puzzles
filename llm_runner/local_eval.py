@@ -1,0 +1,297 @@
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from hashlib import sha1
+from pathlib import Path
+from time import monotonic
+
+from minesweeper.board import GameStatus
+from minesweeper.dataset import board_from_record, coord_to_position, read_puzzle_dataset
+from minesweeper.evaluate import solve_with_trace
+from minesweeper.text import TextBoardEncoder
+
+_ACTION_RE = re.compile(r"ACTION\s*:\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)", re.IGNORECASE)
+
+
+@dataclass(frozen=True, slots=True)
+class LocalModelConfig:
+    model_id: str = "EleutherAI/pythia-14m"
+    max_new_tokens: int = 64
+    temperature: float = 0.0
+    top_p: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class LocalEvalSummary:
+    dataset_path: str
+    session_log_path: str
+    model_id: str
+    evaluated: int
+    won: int
+    lost: int
+    aborted: int
+
+
+class LocalCausalLM:
+    def __init__(self, config: LocalModelConfig) -> None:
+        self.config = config
+        try:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+        except Exception as exc:  # pragma: no cover - import guidance path
+            raise RuntimeError(
+                "transformers is required for local model runs. Install with: pip install transformers torch"
+            ) from exc
+
+        self._tokenizer = AutoTokenizer.from_pretrained(config.model_id)
+        self._model = AutoModelForCausalLM.from_pretrained(config.model_id)
+
+    def generate(self, prompt: str) -> str:
+        encoded = self._tokenizer(prompt, return_tensors="pt")
+        outputs = self._model.generate(
+            **encoded,
+            max_new_tokens=self.config.max_new_tokens,
+            do_sample=self.config.temperature > 0.0,
+            temperature=self.config.temperature if self.config.temperature > 0.0 else None,
+            top_p=self.config.top_p,
+            pad_token_id=self._tokenizer.eos_token_id,
+        )
+        generated = outputs[0][encoded["input_ids"].shape[1] :]
+        return self._tokenizer.decode(generated, skip_special_tokens=True).strip()
+
+
+def run_local_llm_dataset(
+    dataset_path: str,
+    session_log_path: str,
+    model_config: LocalModelConfig,
+    player_id: str = "pythia14m_local",
+    style: str = "coordinates",
+    start_index: int = 0,
+    limit: int | None = None,
+    max_turn_multiplier: int = 3,
+    include_cot: bool = True,
+    reminder_each_turn: bool = False,
+) -> LocalEvalSummary:
+    records = read_puzzle_dataset(dataset_path)
+    if not records:
+        raise RuntimeError("dataset is empty")
+
+    model = LocalCausalLM(model_config)
+    encoder = TextBoardEncoder()
+
+    won = 0
+    lost = 0
+    aborted = 0
+
+    begin = max(start_index, 0)
+    end = len(records) if limit is None else min(len(records), begin + limit)
+
+    for record in records[begin:end]:
+        board, variant = board_from_record(record)
+        started_at = _now_iso()
+        start_clock = monotonic()
+
+        baseline_board = board.clone()
+        baseline_moves, _ = solve_with_trace(baseline_board, variant)
+        turn_limit = max(1, max_turn_multiplier * max(1, len(baseline_moves)))
+
+        system_prompt = _build_system_prompt(variant.code, variant.name, variant.description, include_cot)
+        moves: list[dict] = []
+        final_failure_category: str | None = None
+
+        for turn in range(1, turn_limit + 1):
+            if board.status != GameStatus.IN_PROGRESS:
+                break
+
+            board_text = encoder.render(board, variant=variant, style=style)
+            prompt = _build_turn_prompt(
+                system_prompt=system_prompt,
+                board_text=board_text,
+                turn=turn,
+                reminder=variant.description if reminder_each_turn else None,
+            )
+
+            parse_failures = 0
+            action = None
+            coord = None
+            model_output = ""
+            while parse_failures < 2:
+                model_output = model.generate(prompt)
+                parsed = _parse_action(model_output)
+                if parsed is not None:
+                    action, coord = parsed
+                    break
+                parse_failures += 1
+                prompt = (
+                    prompt
+                    + "\n\nYour previous output could not be parsed. "
+                    + "Reply with exactly one final line in this format: ACTION: REVEAL B3"
+                )
+
+            if action is None or coord is None:
+                final_failure_category = "invalid_move_format"
+                moves.append(
+                    {
+                        "turn": turn,
+                        "prompt": prompt,
+                        "model_output": model_output,
+                        "action": None,
+                        "coordinate": None,
+                        "changed": False,
+                        "hit_mine": False,
+                        "status_after": board.status.value,
+                        "error": "could not parse ACTION line after 2 attempts",
+                        "failure_category": "invalid_move_format",
+                    }
+                )
+                break
+
+            try:
+                position = coord_to_position(coord, board.size)
+                if action == "REVEAL":
+                    outcome = board.reveal(position.row, position.col)
+                    failure_category = "clue_misread" if outcome.hit_mine else None
+                    if outcome.hit_mine:
+                        final_failure_category = failure_category
+                else:
+                    outcome = board.set_flag(position.row, position.col, True)
+                    failure_category = None
+
+                moves.append(
+                    {
+                        "turn": turn,
+                        "prompt": prompt,
+                        "model_output": model_output,
+                        "action": action,
+                        "coordinate": coord,
+                        "changed": outcome.changed,
+                        "hit_mine": outcome.hit_mine,
+                        "status_after": board.status.value,
+                        "error": None,
+                        "failure_category": failure_category,
+                    }
+                )
+            except Exception as exc:
+                final_failure_category = "spatial_reasoning_error"
+                moves.append(
+                    {
+                        "turn": turn,
+                        "prompt": prompt,
+                        "model_output": model_output,
+                        "action": action,
+                        "coordinate": coord,
+                        "changed": False,
+                        "hit_mine": False,
+                        "status_after": board.status.value,
+                        "error": str(exc),
+                        "failure_category": "spatial_reasoning_error",
+                    }
+                )
+                break
+
+        ended_at = _now_iso()
+        duration_seconds = round(monotonic() - start_clock, 3)
+
+        won_flag = board.status == GameStatus.WON
+        lost_flag = board.status == GameStatus.LOST
+        aborted_flag = not won_flag and not lost_flag
+
+        if won_flag:
+            won += 1
+        elif lost_flag:
+            lost += 1
+        else:
+            aborted += 1
+            if final_failure_category is None:
+                final_failure_category = "rule_misinterpretation"
+
+        payload = {
+            "session_id": _session_id(player_id, record.puzzle_id),
+            "puzzle_id": record.puzzle_id,
+            "player_id": player_id,
+            "started_at_utc": started_at,
+            "ended_at_utc": ended_at,
+            "duration_seconds": duration_seconds,
+            "won": won_flag,
+            "lost": lost_flag,
+            "variant_code": variant.code,
+            "move_count": len(moves),
+            "turn_limit": turn_limit,
+            "failure_category": final_failure_category,
+            "model": {
+                "id": model_config.model_id,
+                "max_new_tokens": model_config.max_new_tokens,
+                "temperature": model_config.temperature,
+                "top_p": model_config.top_p,
+            },
+            "prompting": {
+                "include_cot": include_cot,
+                "reminder_each_turn": reminder_each_turn,
+            },
+            "moves": moves,
+        }
+        _append_jsonl(payload, session_log_path)
+
+    return LocalEvalSummary(
+        dataset_path=dataset_path,
+        session_log_path=session_log_path,
+        model_id=model_config.model_id,
+        evaluated=max(0, end - begin),
+        won=won,
+        lost=lost,
+        aborted=aborted,
+    )
+
+
+def _build_system_prompt(variant_code: str, variant_name: str, variant_description: str, include_cot: bool) -> str:
+    reasoning_instruction = (
+        "Think step by step briefly, then provide the action line."
+        if include_cot
+        else "Do not include reasoning. Provide only the action line."
+    )
+    return (
+        "You are solving a Minesweeper puzzle. Standard Minesweeper rules apply.\n"
+        f"Variant [{variant_code}] - {variant_name}: {variant_description}\n"
+        f"{reasoning_instruction}\n"
+        "Output format: ACTION: [REVEAL|FLAG] [col][row]"
+    )
+
+
+def _build_turn_prompt(system_prompt: str, board_text: str, turn: int, reminder: str | None) -> str:
+    pieces = [system_prompt]
+    if reminder:
+        pieces.append(f"Constraint reminder: {reminder}")
+    pieces.append(f"Turn: {turn}")
+    pieces.append("Current board:")
+    pieces.append(board_text)
+    pieces.append("Respond now.")
+    return "\n\n".join(pieces)
+
+
+def _parse_action(text: str) -> tuple[str, str] | None:
+    match = _ACTION_RE.search(text)
+    if match:
+        return match.group(1).upper(), match.group(2).upper()
+
+    fallback = re.search(r"\b(reveal|flag)\s+([A-Za-z]\d+)\b", text, re.IGNORECASE)
+    if fallback:
+        return fallback.group(1).upper(), fallback.group(2).upper()
+    return None
+
+
+def _append_jsonl(payload: dict, output_path: str) -> None:
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, sort_keys=True) + "\n")
+
+
+def _now_iso() -> str:
+    return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _session_id(player_id: str, puzzle_id: str) -> str:
+    payload = f"{player_id}|{puzzle_id}|{_now_iso()}"
+    return sha1(payload.encode("utf-8")).hexdigest()[:16]

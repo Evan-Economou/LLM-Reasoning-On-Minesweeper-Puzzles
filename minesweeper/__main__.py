@@ -8,19 +8,23 @@ if __package__ in (None, ""):
     project_root = Path(__file__).resolve().parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
+    from llm_runner.local_eval import LocalModelConfig, run_local_llm_dataset
     from minesweeper.dataset import build_puzzle_record, board_from_record, read_puzzle_dataset, write_puzzle_dataset
     from minesweeper.evaluate import evaluate_dataset
     from minesweeper.generator import DeterministicPuzzleGenerator
     from minesweeper.play import PlayConfig, run_interactive_session
     from minesweeper.pygame_ui import launch_pygame_ui
+    from minesweeper.session_report import build_session_dashboard
     from minesweeper.text import TextBoardEncoder
     from minesweeper.variants import AVAILABLE_VARIANTS, get_variant
 else:
+    from llm_runner.local_eval import LocalModelConfig, run_local_llm_dataset
     from .dataset import build_puzzle_record, board_from_record, read_puzzle_dataset, write_puzzle_dataset
     from .evaluate import evaluate_dataset
     from .generator import DeterministicPuzzleGenerator
     from .play import PlayConfig, run_interactive_session
     from .pygame_ui import launch_pygame_ui
+    from .session_report import build_session_dashboard
     from .text import TextBoardEncoder
     from .variants import AVAILABLE_VARIANTS, get_variant
 
@@ -164,6 +168,47 @@ def cmd_ui(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_llm_local(args: argparse.Namespace) -> int:
+    model_config = LocalModelConfig(
+        model_id=args.model_id,
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        top_p=args.top_p,
+    )
+    summary = run_local_llm_dataset(
+        dataset_path=args.dataset,
+        session_log_path=args.session_log,
+        model_config=model_config,
+        player_id=args.player_id,
+        style=args.style,
+        start_index=args.start_index,
+        limit=args.limit,
+        max_turn_multiplier=args.max_turn_multiplier,
+        include_cot=args.include_cot,
+        reminder_each_turn=args.reminder_each_turn,
+    )
+    print(
+        f"Evaluated {summary.evaluated} puzzles with {summary.model_id} | "
+        f"won={summary.won} lost={summary.lost} aborted={summary.aborted} | "
+        f"log={summary.session_log_path}"
+    )
+    return 0
+
+
+def cmd_session_report(args: argparse.Namespace) -> int:
+    summary = build_session_dashboard(
+        input_paths=args.input,
+        output_path=args.output,
+        title=args.title,
+    )
+    print(
+        f"Dashboard generated with {summary['sessions']} sessions "
+        f"(won={summary['won']} lost={summary['lost']} aborted={summary['aborted']}) | "
+        f"output={summary['output_path']}"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Minesweeper research CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -225,13 +270,47 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--window-height", type=int, default=700)
     ui.set_defaults(func=cmd_ui)
 
+    llm_local = subparsers.add_parser("llm-local", help="Run local LLM turn loop and log model sessions")
+    llm_local.add_argument("--dataset", default="datasets/puzzles.jsonl")
+    llm_local.add_argument("--session-log", default="datasets/model_sessions_local.jsonl")
+    llm_local.add_argument("--player-id", default="pythia14m_local")
+    llm_local.add_argument("--model-id", default="EleutherAI/pythia-14m")
+    llm_local.add_argument("--max-new-tokens", type=int, default=64)
+    llm_local.add_argument("--temperature", type=float, default=0.0)
+    llm_local.add_argument("--top-p", type=float, default=1.0)
+    llm_local.add_argument("--style", choices=["coordinates", "flat", "narrative"], default="coordinates")
+    llm_local.add_argument("--start-index", type=int, default=0)
+    llm_local.add_argument("--limit", type=int, default=1)
+    llm_local.add_argument("--max-turn-multiplier", type=int, default=3)
+    llm_local.add_argument("--include-cot", action="store_true")
+    llm_local.add_argument("--reminder-each-turn", action="store_true")
+    llm_local.set_defaults(func=cmd_llm_local)
+
+    session_report = subparsers.add_parser("session-report", help="Build an interactive HTML dashboard from session JSONL logs")
+    session_report.add_argument("--input", nargs="+", default=["datasets/model_sessions_local.jsonl"])
+    session_report.add_argument("--output", default="datasets/session_dashboard.html")
+    session_report.add_argument("--title", default="Minesweeper Session Dashboard")
+    session_report.set_defaults(func=cmd_session_report)
+
     return parser
 
 
 def main() -> None:
     parser = build_parser()
 
-    known_commands = {"generate", "dataset-build", "dataset-list", "play", "play-all", "evaluate", "ui", "-h", "--help"}
+    known_commands = {
+        "generate",
+        "dataset-build",
+        "dataset-list",
+        "play",
+        "play-all",
+        "evaluate",
+        "ui",
+        "llm-local",
+        "session-report",
+        "-h",
+        "--help",
+    }
     if len(sys.argv) > 1 and sys.argv[1] not in known_commands:
         # Backward-compatible mode: treat old flags as one-off generate command.
         legacy_args = ["generate", *sys.argv[1:]]

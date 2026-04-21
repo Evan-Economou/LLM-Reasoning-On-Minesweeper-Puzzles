@@ -62,6 +62,28 @@ python -m minesweeper evaluate \
 	--session-log datasets/model_sessions.jsonl
 ```
 
+Run a small local-LLM proof of concept (Pythia 14M):
+
+```bash
+python -m minesweeper llm-local \
+	--dataset datasets/puzzles.jsonl \
+	--limit 1 \
+	--model-id EleutherAI/pythia-14m \
+	--player-id pythia14m_local \
+	--session-log datasets/model_sessions_local.jsonl \
+	--include-cot
+```
+
+For local model inference, install `transformers` and `torch`.
+
+Generate an interactive HTML dashboard for one or more session logs:
+
+```bash
+python -m minesweeper session-report \
+	--input datasets/model_sessions_local.jsonl datasets/model_sessions.jsonl \
+	--output datasets/session_dashboard.html
+```
+
 Launch the simple pygame UI:
 
 ```bash
