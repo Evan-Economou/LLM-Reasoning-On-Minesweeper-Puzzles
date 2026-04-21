@@ -284,7 +284,21 @@ def _build_system_prompt(variant_code: str, variant_name: str, variant_descripti
         "You are solving a Minesweeper puzzle. Standard Minesweeper rules apply.\n"
         f"Variant [{variant_code}] - {variant_name}: {variant_description}\n"
         f"{reasoning_instruction}\n"
-        "Output format: ACTION: [REVEAL|FLAG] [col][row]"
+        "Output format: ACTION: [REVEAL|FLAG] [col][row]\n"
+        "Examples:\n"
+        "```\n"
+        "ACTION: REVEAL A1\n"
+        "```\n"
+        "```\n"
+        "ACTION: FLAG C3\n"
+        "```"
+        "\n"
+        "```\n"
+        "ACTION: REVEAL E5\n"
+        "```\n"
+        "```\n"
+        "ACTION: FLAG B4\n"
+        "```"
     )
 
 
