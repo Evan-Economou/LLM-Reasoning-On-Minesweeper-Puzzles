@@ -1,8 +1,8 @@
 from .board import Cell, MoveOutcome, MinesweeperBoard, Position
 from .generator import DeterministicPuzzleGenerator, GeneratedPuzzle
-from .solver import ExactSolutionCounter, LogicSolver
+from .solver import ExactSolutionCounter, LogicSolver, PuzzleObservation, SolutionEnumerator
 from .text import TextBoardEncoder
-from .variants import StandardVariant, VariantRule
+from .variants import AVAILABLE_VARIANTS, STANDARD_VARIANT, StandardVariant, VariantRule, get_variant
 
 __all__ = [
     "Cell",
@@ -13,7 +13,12 @@ __all__ = [
     "GeneratedPuzzle",
     "ExactSolutionCounter",
     "LogicSolver",
+    "PuzzleObservation",
+    "SolutionEnumerator",
     "TextBoardEncoder",
+    "AVAILABLE_VARIANTS",
+    "STANDARD_VARIANT",
     "StandardVariant",
     "VariantRule",
+    "get_variant",
 ]

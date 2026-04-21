@@ -11,23 +11,27 @@ if __package__ in (None, ""):
         sys.path.insert(0, str(project_root))
     from minesweeper.generator import DeterministicPuzzleGenerator
     from minesweeper.text import TextBoardEncoder
+    from minesweeper.variants import AVAILABLE_VARIANTS, get_variant
 else:
     from .generator import DeterministicPuzzleGenerator
     from .text import TextBoardEncoder
+    from .variants import AVAILABLE_VARIANTS, get_variant
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate a deterministically solvable Minesweeper puzzle")
     parser.add_argument("--size", type=int, default=5)
     parser.add_argument("--mines", type=int, default=5)
+    parser.add_argument("--variant", choices=sorted(AVAILABLE_VARIANTS), default="STD")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--style", choices=["coordinates", "flat", "narrative"], default="coordinates")
     args = parser.parse_args()
 
-    generator = DeterministicPuzzleGenerator(size=args.size, mine_count=args.mines, seed=args.seed)
+    variant = get_variant(args.variant)
+    generator = DeterministicPuzzleGenerator(size=args.size, mine_count=args.mines, variant=variant, seed=args.seed)
     puzzle = generator.generate()
     encoder = TextBoardEncoder()
-    print(encoder.render(puzzle.board, style=args.style))
+    print(encoder.render(puzzle.board, variant=puzzle.variant, style=args.style))
 
 
 if __name__ == "__main__":
