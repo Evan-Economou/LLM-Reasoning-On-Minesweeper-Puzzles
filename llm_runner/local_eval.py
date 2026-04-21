@@ -13,15 +13,22 @@ from minesweeper.dataset import board_from_record, coord_to_position, read_puzzl
 from minesweeper.evaluate import solve_with_trace
 from minesweeper.text import TextBoardEncoder
 
-_ACTION_RE = re.compile(r"ACTION\s*:\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)", re.IGNORECASE)
+_ACTION_LINE_RE = re.compile(r"^\s*ACTION\s*:\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
+_BARE_ACTION_LINE_RE = re.compile(r"^\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
+_PROMPT_ECHO_RE = re.compile(
+    r"(your previous output could not be parsed|output format\s*:|action\s*:\s*\[reveal\|flag\]|respond now\.)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class LocalModelConfig:
     model_id: str = "EleutherAI/pythia-14m"
-    max_new_tokens: int = 64
+    max_new_tokens: int = 32
     temperature: float = 0.0
     top_p: float = 1.0
+    repetition_penalty: float = 1.12
+    no_repeat_ngram_size: int = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +63,9 @@ class LocalCausalLM:
             do_sample=self.config.temperature > 0.0,
             temperature=self.config.temperature if self.config.temperature > 0.0 else None,
             top_p=self.config.top_p,
+            repetition_penalty=self.config.repetition_penalty,
+            no_repeat_ngram_size=self.config.no_repeat_ngram_size,
+            renormalize_logits=True,
             pad_token_id=self._tokenizer.eos_token_id,
         )
         generated = outputs[0][encoded["input_ids"].shape[1] :]
@@ -100,6 +110,8 @@ def run_local_llm_dataset(
         system_prompt = _build_system_prompt(variant.code, variant.name, variant.description, include_cot)
         moves: list[dict] = []
         final_failure_category: str | None = None
+        parse_fail_turns = 0
+        echo_like_outputs = 0
 
         for turn in range(1, turn_limit + 1):
             if board.status != GameStatus.IN_PROGRESS:
@@ -114,24 +126,35 @@ def run_local_llm_dataset(
             )
 
             parse_failures = 0
+            parse_failure_modes: list[str] = []
             action = None
             coord = None
             model_output = ""
+            attempt_prompt = prompt
             while parse_failures < 2:
-                model_output = model.generate(prompt)
+                model_output = model.generate(attempt_prompt)
                 parsed = _parse_action(model_output)
                 if parsed is not None:
                     action, coord = parsed
+                    prompt = attempt_prompt
                     break
+                mode = _classify_unparsed_output(model_output)
+                parse_failure_modes.append(mode)
+                if mode == "prompt_echo_response":
+                    echo_like_outputs += 1
                 parse_failures += 1
-                prompt = (
-                    prompt
-                    + "\n\nYour previous output could not be parsed. "
-                    + "Reply with exactly one final line in this format: ACTION: REVEAL B3"
-                )
+                if parse_failures < 2:
+                    attempt_prompt = _build_repair_prompt(model_output)
+                    prompt = attempt_prompt
 
             if action is None or coord is None:
-                final_failure_category = "invalid_move_format"
+                parse_fail_turns += 1
+                if "prompt_echo_response" in parse_failure_modes:
+                    final_failure_category = "prompt_echo_response"
+                elif "no_response" in parse_failure_modes:
+                    final_failure_category = "no_response"
+                else:
+                    final_failure_category = "format_failure_loop"
                 moves.append(
                     {
                         "turn": turn,
@@ -143,7 +166,7 @@ def run_local_llm_dataset(
                         "hit_mine": False,
                         "status_after": board.status.value,
                         "error": "could not parse ACTION line after 2 attempts",
-                        "failure_category": "invalid_move_format",
+                        "failure_category": final_failure_category,
                     }
                 )
                 break
@@ -220,11 +243,17 @@ def run_local_llm_dataset(
             "move_count": len(moves),
             "turn_limit": turn_limit,
             "failure_category": final_failure_category,
+            "diagnostics": {
+                "parse_fail_turns": parse_fail_turns,
+                "echo_like_outputs": echo_like_outputs,
+            },
             "model": {
                 "id": model_config.model_id,
                 "max_new_tokens": model_config.max_new_tokens,
                 "temperature": model_config.temperature,
                 "top_p": model_config.top_p,
+                "repetition_penalty": model_config.repetition_penalty,
+                "no_repeat_ngram_size": model_config.no_repeat_ngram_size,
             },
             "prompting": {
                 "include_cot": include_cot,
@@ -270,15 +299,37 @@ def _build_turn_prompt(system_prompt: str, board_text: str, turn: int, reminder:
     return "\n\n".join(pieces)
 
 
-def _parse_action(text: str) -> tuple[str, str] | None:
-    match = _ACTION_RE.search(text)
-    if match:
-        return match.group(1).upper(), match.group(2).upper()
+def _build_repair_prompt(previous_output: str) -> str:
+    return (
+        "Your last response could not be parsed as a move.\n"
+        "Return exactly one line in this format: ACTION: [REVEAL|FLAG] [col][row].\n"
+        "Do not include any explanation or extra lines.\n\n"
+        "Previous response:\n"
+        f"{previous_output}\n\n"
+        "Now output exactly one ACTION line."
+    )
 
-    fallback = re.search(r"\b(reveal|flag)\s+([A-Za-z]\d+)\b", text, re.IGNORECASE)
-    if fallback:
-        return fallback.group(1).upper(), fallback.group(2).upper()
+
+def _parse_action(text: str) -> tuple[str, str] | None:
+    # Parse only full standalone lines (prefer the final line), so echoed prompt text
+    # like "format: ACTION: ..." is not mistaken for the model's actual move.
+    lines = [line for line in text.splitlines() if line.strip()]
+    for line in reversed(lines):
+        match = _ACTION_LINE_RE.match(line)
+        if match:
+            return match.group(1).upper(), match.group(2).upper()
+        fallback = _BARE_ACTION_LINE_RE.match(line)
+        if fallback:
+            return fallback.group(1).upper(), fallback.group(2).upper()
     return None
+
+
+def _classify_unparsed_output(text: str) -> str:
+    if not text.strip():
+        return "no_response"
+    if _PROMPT_ECHO_RE.search(text):
+        return "prompt_echo_response"
+    return "invalid_move_format"
 
 
 def _append_jsonl(payload: dict, output_path: str) -> None:

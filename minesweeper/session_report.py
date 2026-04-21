@@ -152,6 +152,33 @@ def _render_dashboard_html(
       --warn: #9b6a12;
       --accent: #0b5c66;
     }
+    .io-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .io-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .io-head {
+      padding: 6px 8px;
+      font-size: 12px;
+      font-weight: bold;
+      border-bottom: 1px solid var(--line);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .io-head.prompt { background: #eef4fb; color: #204c73; }
+    .io-head.output { background: #f8efe2; color: #70471b; }
+    .kv {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     * { box-sizing: border-box; }
     body {
       margin: 0;
@@ -282,6 +309,7 @@ def _render_dashboard_html(
       .controls { grid-template-columns: 1fr; }
       .layout { grid-template-columns: 1fr; }
       .meta { grid-template-columns: 1fr; }
+      .io-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -536,8 +564,18 @@ def _render_dashboard_html(
           <tr>
             <td colspan="7">
               <details>
-                <summary>Prompt and model output for turn ${escapeHtml(String(move.turn ?? '-'))}</summary>
-                <div class="code"><strong>Prompt</strong>\n${escapeHtml(prompt || '(none)')}\n\n<strong>Model output</strong>\n${escapeHtml(output || '(none)')}</div>
+                <summary>Turn ${escapeHtml(String(move.turn ?? '-'))} transcripts</summary>
+                <div class="kv">Parsed move recorded by evaluator: ${escapeHtml(String(action))} ${escapeHtml(String(coordinate))}</div>
+                <div class="io-grid">
+                  <div class="io-card">
+                    <div class="io-head prompt">Prompt sent to model</div>
+                    <div class="code">${escapeHtml(prompt || '(none)')}</div>
+                  </div>
+                  <div class="io-card">
+                    <div class="io-head output">Raw model output</div>
+                    <div class="code">${escapeHtml(output || '(none)')}</div>
+                  </div>
+                </div>
               </details>
             </td>
           </tr>

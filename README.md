@@ -1,116 +1,95 @@
 # LLM-Reasoning-On-Minesweeper-Puzzles
 
-Deterministic Minesweeper engine for the project plan in `minesweeper_llm_project_plan.md`.
+Deterministic Minesweeper environment for building puzzle datasets, collecting human play sessions, and evaluating local LLM agents.
 
-## Quick Start
+## Setup
 
-Generate a puzzle with the built-in deterministic generator:
-
-```bash
-python -m minesweeper --seed 7 --mines 5 --size 5
-```
-
-Generate a variant puzzle (example: Quad):
+Create and sync the environment with `uv`:
 
 ```bash
-python -m minesweeper --variant Q --seed 11 --mines 8 --size 5
+uv sync
 ```
 
-Build a reusable puzzle dataset:
+If you want every optional feature (`pygame` UI + local LLM dependencies), use:
+
+```bash
+uv sync --extra all
+```
+
+Run commands from the project root using:
+
+```bash
+python -m minesweeper <subcommand>
+```
+
+## Main Run Configurations
+
+### 1. Build a Dataset with the Puzzle Generator
+
+Generate reusable puzzles across variants into JSONL:
 
 ```bash
 python -m minesweeper dataset-build \
-	--output datasets/puzzles.jsonl \
-	--variants STD Q C L P X \
-	--count-per-variant 10 \
-	--variant-mines Q=8 C=6 L=6 P=6 X=6
+  --output datasets/puzzles.jsonl \
+  --variants STD Q C L P X \
+  --count-per-variant 10 \
+  --variant-mines Q=8 C=6 L=6 P=6 X=6
 ```
 
-List dataset contents:
+Inspect what was generated:
 
 ```bash
 python -m minesweeper dataset-list --dataset datasets/puzzles.jsonl --verbose
 ```
 
-Play a puzzle and log a session result (control dataset):
+### 2. Run the UI to Play Puzzles as a Human
 
-```bash
-python -m minesweeper play \
-	--dataset datasets/puzzles.jsonl \
-	--index 0 \
-	--player-id human_01 \
-	--session-log datasets/control_sessions.jsonl
-```
-
-Play through levels sequentially and log each one:
-
-```bash
-python -m minesweeper play-all \
-	--dataset datasets/puzzles.jsonl \
-	--start-index 0 \
-	--limit 14 \
-	--player-id human_01 \
-	--session-log datasets/control_sessions.jsonl
-```
-
-Run the internal baseline evaluator and log model-style sessions:
-
-```bash
-python -m minesweeper evaluate \
-	--dataset datasets/puzzles.jsonl \
-	--player-id solver_baseline \
-	--session-log datasets/model_sessions.jsonl
-```
-
-Run a small local-LLM proof of concept (Pythia 14M):
-
-```bash
-python -m minesweeper llm-local \
-	--dataset datasets/puzzles.jsonl \
-	--limit 1 \
-	--model-id EleutherAI/pythia-14m \
-	--player-id pythia14m_local \
-	--session-log datasets/model_sessions_local.jsonl \
-	--include-cot
-```
-
-For local model inference, install `transformers` and `torch`.
-
-Generate an interactive HTML dashboard for one or more session logs:
-
-```bash
-python -m minesweeper session-report \
-	--input datasets/model_sessions_local.jsonl datasets/model_sessions.jsonl \
-	--output datasets/session_dashboard.html
-```
-
-Launch the simple pygame UI:
+Launch the pygame UI against your dataset and log sessions:
 
 ```bash
 python -m minesweeper ui \
-	--dataset datasets/puzzles.jsonl \
-	--player-id human_01 \
-	--session-log datasets/control_sessions.jsonl
+  --dataset datasets/puzzles.jsonl \
+  --player-id human_01 \
+  --session-log datasets/control_sessions.jsonl
 ```
 
-The package provides:
+Session records are appended to `datasets/control_sessions.jsonl`.
 
-- a 5x5 board engine with reveal, flag, win, and loss logic
-- a logic solver/counter that evaluate puzzles under selected variant rules
-- an exact solution counter used to guarantee unique puzzles during generation
-- multiple plain-text encodings for model-facing prompts
+### 3. Run an LLM Agent to Solve Puzzles
 
-For non-standard variants, generation enforces two checks:
+Run a local causal LLM on the dataset and log model sessions:
 
-- the puzzle has a unique solution under that variant's rules
-- the same revealed clues are not uniquely solvable under standard Minesweeper assumptions
+```bash
+python -m minesweeper llm-local \
+  --dataset datasets/puzzles.jsonl \
+  --limit 10 \
+  --model-id EleutherAI/pythia-14m \
+  --player-id pythia14m_local \
+  --session-log datasets/model_sessions_local.jsonl \
+  --include-cot
+```
 
-Dataset format details:
+Quick deterministic baseline (no external model) for comparison:
 
-- puzzle dataset is JSONL (`datasets/puzzles.jsonl`) with one puzzle per line
-- each puzzle stores puzzle id, variant, size, mine positions, initial reveals, and rendered initial board text
-- play sessions are appended to JSONL (`datasets/control_sessions.jsonl`) with move-by-move logs and final outcome
-- the baseline evaluator writes the same session schema to `datasets/model_sessions.jsonl`
-- the pygame UI supports mouse reveal/flag play plus next/prev and restart controls
+```bash
+python -m minesweeper evaluate \
+  --dataset datasets/puzzles.jsonl \
+  --player-id solver_baseline \
+  --session-log datasets/model_sessions.jsonl
+```
 
-The code is pure Python and has no third-party dependencies.
+## Session Reporting
+
+Build an HTML dashboard from one or more session logs:
+
+```bash
+python -m minesweeper session-report \
+  --input datasets/model_sessions_local.jsonl datasets/model_sessions.jsonl datasets/control_sessions.jsonl \
+  --output datasets/session_dashboard.html
+```
+
+## Notes
+
+- Dataset files are JSONL, one puzzle/session per line.
+- For non-standard variants, generation enforces variant-unique solvability checks.
+- UI supports mouse reveal/flag and level navigation (next/prev/restart).

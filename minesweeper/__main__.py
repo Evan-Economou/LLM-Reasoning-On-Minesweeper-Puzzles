@@ -174,6 +174,8 @@ def cmd_llm_local(args: argparse.Namespace) -> int:
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
+        repetition_penalty=args.repetition_penalty,
+        no_repeat_ngram_size=args.no_repeat_ngram_size,
     )
     summary = run_local_llm_dataset(
         dataset_path=args.dataset,
@@ -275,9 +277,11 @@ def build_parser() -> argparse.ArgumentParser:
     llm_local.add_argument("--session-log", default="datasets/model_sessions_local.jsonl")
     llm_local.add_argument("--player-id", default="pythia14m_local")
     llm_local.add_argument("--model-id", default="EleutherAI/pythia-14m")
-    llm_local.add_argument("--max-new-tokens", type=int, default=64)
+    llm_local.add_argument("--max-new-tokens", type=int, default=32)
     llm_local.add_argument("--temperature", type=float, default=0.0)
     llm_local.add_argument("--top-p", type=float, default=1.0)
+    llm_local.add_argument("--repetition-penalty", type=float, default=1.12)
+    llm_local.add_argument("--no-repeat-ngram-size", type=int, default=4)
     llm_local.add_argument("--style", choices=["coordinates", "flat", "narrative"], default="coordinates")
     llm_local.add_argument("--start-index", type=int, default=0)
     llm_local.add_argument("--limit", type=int, default=1)
