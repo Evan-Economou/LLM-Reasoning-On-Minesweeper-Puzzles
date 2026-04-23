@@ -19,6 +19,8 @@ _PROMPT_ECHO_RE = re.compile(
     r"(your previous output could not be parsed|output format\s*:|action\s*:\s*\[reveal\|flag\]|respond now\.)",
     re.IGNORECASE,
 )
+# More tolerant action parsing: allows variations like "REVEAL A1", "ACTION: REVEAL A1", "A1 REVEAL"
+_FLEXIBLE_ACTION_RE = re.compile(r"(REVEAL|FLAG)\s+([A-Za-z]\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,20 +56,42 @@ class LocalCausalLM:
 
         self._tokenizer = AutoTokenizer.from_pretrained(config.model_id)
         self._model = AutoModelForCausalLM.from_pretrained(config.model_id)
+        
+        # Detect if model has chat template (instruct/chat models)
+        self._has_chat_template = hasattr(self._tokenizer, 'chat_template') and self._tokenizer.chat_template is not None
 
     def generate(self, prompt: str) -> str:
-        encoded = self._tokenizer(prompt, return_tensors="pt")
-        outputs = self._model.generate(
-            **encoded,
-            max_new_tokens=self.config.max_new_tokens,
-            do_sample=self.config.temperature > 0.0,
-            temperature=self.config.temperature if self.config.temperature > 0.0 else None,
-            top_p=self.config.top_p,
-            repetition_penalty=self.config.repetition_penalty,
-            no_repeat_ngram_size=self.config.no_repeat_ngram_size,
-            renormalize_logits=True,
-            pad_token_id=self._tokenizer.eos_token_id,
-        )
+        # Format prompt using chat template if available
+        if self._has_chat_template:
+            formatted_prompt = self._tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                tokenize=False,
+                add_generation_prompt=True
+            )
+        else:
+            formatted_prompt = prompt
+        
+        encoded = self._tokenizer(formatted_prompt, return_tensors="pt")
+        
+        # Prepare stop tokens: use eos_token or common stop strings
+        stop_token_ids = [self._tokenizer.eos_token_id] if self._tokenizer.eos_token_id is not None else []
+        kwargs = {
+            "max_new_tokens": self.config.max_new_tokens,
+            "do_sample": self.config.temperature > 0.0,
+            "temperature": self.config.temperature if self.config.temperature > 0.0 else None,
+            "top_p": self.config.top_p,
+            "repetition_penalty": self.config.repetition_penalty,
+            "no_repeat_ngram_size": self.config.no_repeat_ngram_size,
+            "renormalize_logits": True,
+            "pad_token_id": self._tokenizer.eos_token_id,
+        }
+        
+        # Add stopping criteria: stop at newline after common prompt endings
+        if stop_token_ids:
+            kwargs["eos_token_id"] = stop_token_ids
+        
+        outputs = self._model.generate(**encoded, **kwargs)
+        
         generated = outputs[0][encoded["input_ids"].shape[1] :]
         return self._tokenizer.decode(generated, skip_special_tokens=True).strip()
 
@@ -98,7 +122,17 @@ def run_local_llm_dataset(
     begin = max(start_index, 0)
     end = len(records) if limit is None else min(len(records), begin + limit)
 
-    for record in records[begin:end]:
+    print(
+        f"{'='*70}\n"
+        f"Starting LLM puzzle evaluation:\n"
+        f"  Model: {model_config.model_id}\n"
+        f"  Dataset: {dataset_path} ({len(records)} puzzles total)\n"
+        f"  Processing: puzzles {begin + 1} to {end}\n"
+        f"  Player ID: {player_id}\n"
+        f"{'='*70}\n"
+    )
+
+    for idx, record in enumerate(records[begin:end], start=begin + 1):
         board, variant = board_from_record(record)
         started_at = _now_iso()
         start_clock = monotonic()
@@ -182,6 +216,24 @@ def run_local_llm_dataset(
                     outcome = board.set_flag(position.row, position.col, True)
                     failure_category = None
 
+                if not outcome.changed:
+                    final_failure_category = "invalid_repeated_move"
+                    moves.append(
+                        {
+                            "turn": turn,
+                            "prompt": prompt,
+                            "model_output": model_output,
+                            "action": action,
+                            "coordinate": coord,
+                            "changed": False,
+                            "hit_mine": False,
+                            "status_after": board.status.value,
+                            "error": "invalid move: attempted to act on an already revealed/flagged cell",
+                            "failure_category": "invalid_repeated_move",
+                        }
+                    )
+                    break
+
                 moves.append(
                     {
                         "turn": turn,
@@ -195,6 +247,15 @@ def run_local_llm_dataset(
                         "error": None,
                         "failure_category": failure_category,
                     }
+                )
+
+                # Intermediate progress output to avoid long silent gaps.
+                move_elapsed_seconds = monotonic() - start_clock
+                print(
+                    f"  turn={turn:2} action={action:6} coord={coord:4} "
+                    f"changed={'Y' if outcome.changed else 'N'} "
+                    f"status={board.status.value:11} "
+                    f"elapsed={move_elapsed_seconds:7.2f}s"
                 )
             except Exception as exc:
                 final_failure_category = "spatial_reasoning_error"
@@ -263,6 +324,24 @@ def run_local_llm_dataset(
         }
         _append_jsonl(payload, session_log_path)
 
+        # Progress output
+        outcome = "WON" if won_flag else "LOST" if lost_flag else "ABORTED"
+        print(
+            f"[{idx}/{end - begin}] {record.puzzle_id:12} ({variant.code:2}) {outcome:12} "
+            f"moves={len(moves):2} time={duration_seconds:6.2f}s"
+        )
+
+    # Final summary
+    total_evaluated = max(0, end - begin)
+    win_rate = (won / total_evaluated * 100) if total_evaluated > 0 else 0
+    print(
+        f"\n{'='*70}\n"
+        f"Complete! Evaluated {total_evaluated} puzzles:\n"
+        f"  Won: {won} ({win_rate:.1f}%) | Lost: {lost} | Aborted: {aborted}\n"
+        f"  Session log: {session_log_path}\n"
+        f"{'='*70}"
+    )
+
     return LocalEvalSummary(
         dataset_path=dataset_path,
         session_log_path=session_log_path,
@@ -318,8 +397,6 @@ def _build_repair_prompt(previous_output: str) -> str:
         "Your last response could not be parsed as a move.\n"
         "Return exactly one line in this format: ACTION: [REVEAL|FLAG] [col][row].\n"
         "Do not include any explanation or extra lines.\n\n"
-        "Previous response:\n"
-        f"{previous_output}\n\n"
         "Now output exactly one ACTION line."
     )
 
@@ -328,13 +405,25 @@ def _parse_action(text: str) -> tuple[str, str] | None:
     # Parse only full standalone lines (prefer the final line), so echoed prompt text
     # like "format: ACTION: ..." is not mistaken for the model's actual move.
     lines = [line for line in text.splitlines() if line.strip()]
+    
     for line in reversed(lines):
+        # Strict format: "ACTION: REVEAL A1" or similar
         match = _ACTION_LINE_RE.match(line)
         if match:
             return match.group(1).upper(), match.group(2).upper()
+        
+        # Bare format: "REVEAL A1"
         fallback = _BARE_ACTION_LINE_RE.match(line)
         if fallback:
             return fallback.group(1).upper(), fallback.group(2).upper()
+        
+        # Flexible format: allows more variations like "A1 REVEAL" or "Reveal A1"
+        # But skip lines that look like prompt echoes
+        if not _PROMPT_ECHO_RE.search(line):
+            flexible = _FLEXIBLE_ACTION_RE.search(line)
+            if flexible:
+                return flexible.group(1).upper(), flexible.group(2).upper()
+    
     return None
 
 
