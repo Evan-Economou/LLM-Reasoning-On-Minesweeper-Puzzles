@@ -506,6 +506,70 @@ def _render_dashboard_html(
     .io-head.prompt { background: #eef4fb; color: #204c73; }
     .io-head.output { background: #f8efe2; color: #70471b; }
     .kv { margin-top: 6px; color: var(--muted); font-size: 12px; }
+    .rules-menu {
+      margin-top: 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .rules-menu summary {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+      cursor: pointer;
+      user-select: none;
+    }
+    .rules-content {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .rules-section {
+      margin-bottom: 14px;
+    }
+    .rules-section h3 {
+      margin: 8px 0 6px 0;
+      font-size: 13px;
+      font-weight: bold;
+      color: var(--ink);
+    }
+    .rules-section p {
+      margin: 6px 0;
+      color: var(--ink);
+    }
+    .variant-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .variant-card {
+      border: 1px solid #ddd4c1;
+      border-radius: 8px;
+      padding: 8px;
+      background: #fbfaf6;
+    }
+    .variant-code {
+      font-weight: bold;
+      color: var(--accent);
+      font-family: "Courier New", monospace;
+      font-size: 12px;
+    }
+    .variant-name {
+      font-weight: 600;
+      color: var(--ink);
+      font-size: 12px;
+    }
+    .variant-desc {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
   </style>
 </head>
 <body>
@@ -532,6 +596,93 @@ def _render_dashboard_html(
         <option value="aborted">Aborted</option>
       </select>
       <select id="failure"><option value="">All failure categories</option></select>
+    </section>
+
+    <section class="rules-menu">
+      <details>
+        <summary>Minesweeper Base Rules & Variants</summary>
+        <div class="rules-content">
+          <div class="rules-section">
+            <h3>Basic Minesweeper Rules</h3>
+            <p><strong>Goal:</strong> Reveal all safe cells without hitting any mines.</p>
+            <p><strong>Gameplay:</strong></p>
+            <ul style="margin: 6px 0; padding-left: 20px;">
+              <li>Each revealed cell shows the number of adjacent mines (0-8), or is empty</li>
+              <li>Flag cells you believe contain mines to keep track</li>
+              <li>Use logical deduction to identify safe cells</li>
+              <li>Win by revealing all non-mine cells</li>
+              <li>Lose by revealing a mine</li>
+            </ul>
+          </div>
+
+          <div class="rules-section">
+            <h3>Variant Rules</h3>
+            <p>Standard Minesweeper can be modified with additional constraints:</p>
+            <div class="variant-grid">
+              <div class="variant-card">
+                <div class="variant-code">STD</div>
+                <div class="variant-name">Standard</div>
+                <div class="variant-desc">Classic Minesweeper rules with no additional constraints.</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">Q</div>
+                <div class="variant-name">Quad</div>
+                <div class="variant-desc">Each 2×2 block must contain at least one mine.</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">C</div>
+                <div class="variant-name">Connected</div>
+                <div class="variant-desc">All mines must be in one 8-connected component.</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">T</div>
+                <div class="variant-name">Triplet</div>
+                <div class="variant-desc">No 3 mines can appear in a contiguous line (horizontal, vertical, or diagonal).</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">O</div>
+                <div class="variant-name">Outside</div>
+                <div class="variant-desc">Safe cells are connected. Each mine must connect to the border through mines.</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">D</div>
+                <div class="variant-name">Dual</div>
+                <div class="variant-desc">Mines form disjoint non-touching orthogonal pairs (exactly 2 mines per pair).</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">S</div>
+                <div class="variant-name">Snake</div>
+                <div class="variant-desc">Mines form one non-self-intersecting orthogonal path.</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">R</div>
+                <div class="variant-name">RowCol</div>
+                <div class="variant-desc">All rows and columns contain the same number of mines.</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">H</div>
+                <div class="variant-name">Horizontal</div>
+                <div class="variant-desc">No two mines can touch horizontally (orthogonal pairs are forbidden).</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">P</div>
+                <div class="variant-name">Partition</div>
+                <div class="variant-desc">Clue number = count of consecutive mine groups in the 8-neighbor ring around the cell.</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">L</div>
+                <div class="variant-name">Liar</div>
+                <div class="variant-desc">Each clue differs from the true adjacent mine count by exactly one.</div>
+              </div>
+              <div class="variant-card">
+                <div class="variant-code">X</div>
+                <div class="variant-name">Cross</div>
+                <div class="variant-desc">Clue counts mines in a plus-shaped region (up to distance 2 in cardinal directions).</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
     </section>
 
     <section class="layout">
