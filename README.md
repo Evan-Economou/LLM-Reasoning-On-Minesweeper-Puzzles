@@ -1,5 +1,12 @@
 # LLM-Reasoning-On-Minesweeper-Puzzles
 
+## Repo Map
+
+- [minesweeper/](minesweeper/) - Core handling of game logic. Includes puzzle generation, and play session recording and evaluation.
+- [llm_runner/](llm_runner/) - Local LLM evaluation helpers and runner utilities.
+- [writeup.md](writeup.md) - Project writeup and results.
+- [pyproject.toml](pyproject.toml) - Package metadata, dependencies, and script definitions.
+
 Deterministic Minesweeper environment for building puzzle datasets, collecting human play sessions, and evaluating local LLM agents.
 
 ## Setup
