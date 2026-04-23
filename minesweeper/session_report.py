@@ -609,7 +609,6 @@ def _render_dashboard_html(
             <ul style="margin: 6px 0; padding-left: 20px;">
               <li>Each revealed cell shows the number of adjacent mines (0-8), or is empty</li>
               <li>Flag cells you believe contain mines to keep track</li>
-              <li>Use logical deduction to identify safe cells</li>
               <li>Win by revealing all non-mine cells</li>
               <li>Lose by revealing a mine</li>
             </ul>
@@ -655,8 +654,8 @@ def _render_dashboard_html(
                 <div class="variant-desc">Mines form one non-self-intersecting orthogonal path.</div>
               </div>
               <div class="variant-card">
-                <div class="variant-code">R</div>
-                <div class="variant-name">RowCol</div>
+                <div class="variant-code">B</div>
+                <div class="variant-name">Balance</div>
                 <div class="variant-desc">All rows and columns contain the same number of mines.</div>
               </div>
               <div class="variant-card">
