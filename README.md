@@ -7,7 +7,6 @@
 - [writeup.md](writeup.md) - Project writeup and results.
 - [pyproject.toml](pyproject.toml) - Package metadata, dependencies, and script definitions.
 
-Deterministic Minesweeper environment for building puzzle datasets, collecting human play sessions, and evaluating local LLM agents.
 
 ## Setup
 
@@ -17,7 +16,7 @@ Create and sync the environment with `uv`:
 uv sync
 ```
 
-If you want every optional feature (`pygame` UI + local LLM dependencies), use:
+If you want to additionally include pygame to be able to add to the dataset yourself for fun, create the venv with:
 
 ```bash
 uv sync --extra all
@@ -49,7 +48,20 @@ Inspect what was generated:
 python -m minesweeper dataset-list --dataset datasets/puzzles.jsonl --verbose
 ```
 
+### 2. Run the deterministic solver to verify the dataset
+
+Quick deterministic baseline for verification of the solvability of each puzzle, also to increase the winrate displayed on the dashboard:
+
+```bash
+python -m minesweeper evaluate \
+  --dataset datasets/puzzles.jsonl \
+  --player-id deterministic_solver \
+  --session-log datasets/control_sessions.jsonl
+```
+
 ### 2. Run the UI to Play Puzzles as a Human
+
+This feature is not very fleshed out, it is not an important piece of the project. However, it is useful for inspecting the dataset in context and getting a baseline for comparison.
 
 Launch the pygame UI against your dataset and log sessions:
 
@@ -57,14 +69,14 @@ Launch the pygame UI against your dataset and log sessions:
 python -m minesweeper ui \
   --dataset datasets/puzzles.jsonl \
   --player-id human_01 \
-  --session-log datasets/control_sessions.jsonl
+  --session-log datasets/human_sessions.jsonl
 ```
 
-Session records are appended to `datasets/control_sessions.jsonl`.
+Session records are appended to the file specified in --session-log, in this case it's `datasets/control_sessions.jsonl`.
 
-### 3. Run an LLM Agent to Solve Puzzles
+### 3. Run a local LLM to Solve Puzzles
 
-Run a local causal LLM on the dataset and log model sessions:
+Run a local LLM on the dataset and log model sessions:
 
 ```bash
 python -m minesweeper llm-local \
@@ -76,14 +88,12 @@ python -m minesweeper llm-local \
   --include-cot
 ```
 
-Quick deterministic baseline (no external model) for comparison:
+This downloads the model specified by --model-id from the huggingface api and runs the first `limit` puzzles from the dataset with it. Pythia-14m was chosen just as a proof of concept that the general program flow is working, but instruction tuned models and larger models will produce better results.
 
-```bash
-python -m minesweeper evaluate \
-  --dataset datasets/puzzles.jsonl \
-  --player-id solver_baseline \
-  --session-log datasets/model_sessions.jsonl
-```
+
+### 4. Run an LLM Agent through an API
+
+Coming soon
 
 ## Session Reporting
 
@@ -91,12 +101,12 @@ Build an HTML dashboard from one or more session logs:
 
 ```bash
 python -m minesweeper session-report \
-  --input datasets/model_sessions_local.jsonl datasets/model_sessions.jsonl datasets/control_sessions.jsonl \
+  --input datasets/model_sessions_local.jsonl datasets/control_sessions.jsonl datasets/human_sessions.jsonl \
   --output datasets/session_dashboard.html
 ```
 
+This coalesces all of the listed session reports and builds an html dashboard to display them, which by default is placed alongside the datasets.
+
 ## Notes
 
-- Dataset files are JSONL, one puzzle/session per line.
-- For non-standard variants, generation enforces variant-unique solvability checks.
-- UI supports mouse reveal/flag and level navigation (next/prev/restart).
+- Dataset files are JSONL, with one puzzle/session per line.
