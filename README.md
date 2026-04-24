@@ -59,7 +59,7 @@ python -m minesweeper evaluate \
   --session-log datasets/control_sessions.jsonl
 ```
 
-### 2. Run the UI to Play Puzzles as a Human
+### 3. Run the UI to Play Puzzles as a Human
 
 This feature is not very fleshed out, it is not an important piece of the project. However, it is useful for inspecting the dataset in context and getting a baseline for comparison.
 
@@ -74,7 +74,7 @@ python -m minesweeper ui \
 
 Session records are appended to the file specified in --session-log, in this case it's `datasets/control_sessions.jsonl`.
 
-### 3. Run a local LLM to Solve Puzzles
+### 4. Run a local LLM to Solve Puzzles
 
 Run a local LLM on the dataset and log model sessions:
 
@@ -90,10 +90,24 @@ python -m minesweeper llm-local \
 
 This downloads the model specified by --model-id from the huggingface api and runs the first `limit` puzzles from the dataset with it. Pythia-14m was chosen just as a proof of concept that the general program flow is working, but instruction tuned models and larger models will produce better results.
 
+Useful optional flags for `llm-local` for controling hyperparameters:
 
-### 4. Run an LLM Agent through an API
+- `--temperature` (default `0.0`): Sampling temperature. Use `0.0` for deterministic decoding, raise it for more randomness.
+- `--top-p` (default `1.0`): Nucleus sampling threshold. Lower values restrict generation to higher-probability tokens.
+- `--max-new-tokens` (default `32`): Maximum tokens generated per turn, more than the default shouldn't be necessary.
+- `--repetition-penalty` (default `1.12`): Penalizes token repetition; higher values reduce repeated loops.
+- `--no-repeat-ngram-size` (default `4`): Prevents repeating any n-gram of this length in one response.
+- `--style` (default `coordinates`): Board text format passed to the model. Choices: `coordinates`, `flat`, `narrative`.
+- `--start-index` (default `0`): Start puzzle index in the dataset.
+- `--limit` (default `1`): Number of puzzles to run from `--start-index`.
+- `--max-turn-multiplier` (default `3`): Turn budget scaling factor relative to the baseline solver's move count.
+- `--include-cot` (flag, default off): Asks the model for brief reasoning before the final action line.
+- `--reminder-each-turn` (flag, default off): Repeats the variant constraint text on every turn prompt.
 
-Coming soon
+
+### 5. Run an LLM Agent through an API
+
+Coming soon, to a repo near you
 
 ## Session Reporting
 
