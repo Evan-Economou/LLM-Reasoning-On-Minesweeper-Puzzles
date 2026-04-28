@@ -12,6 +12,7 @@ from minesweeper.board import GameStatus
 from minesweeper.dataset import board_from_record, coord_to_position, read_puzzle_dataset
 from minesweeper.evaluate import solve_with_trace
 from minesweeper.text import TextBoardEncoder
+from .model_backends import ChatMessage, ChatModelConfig, create_chat_backend
 
 _ACTION_LINE_RE = re.compile(r"^\s*ACTION\s*:\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
 _BARE_ACTION_LINE_RE = re.compile(r"^\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
@@ -23,20 +24,14 @@ _PROMPT_ECHO_RE = re.compile(
 _FLEXIBLE_ACTION_RE = re.compile(r"(REVEAL|FLAG)\s+([A-Za-z]\d+)", re.IGNORECASE)
 
 
-@dataclass(frozen=True, slots=True)
-class LocalModelConfig:
-    model_id: str = "EleutherAI/pythia-14m"
-    max_new_tokens: int = 32
-    temperature: float = 0.0
-    top_p: float = 1.0
-    repetition_penalty: float = 1.12
-    no_repeat_ngram_size: int = 4
+LocalModelConfig = ChatModelConfig
 
 
 @dataclass(frozen=True, slots=True)
 class LocalEvalSummary:
     dataset_path: str
     session_log_path: str
+    provider: str
     model_id: str
     evaluated: int
     won: int
@@ -44,63 +39,11 @@ class LocalEvalSummary:
     aborted: int
 
 
-class LocalCausalLM:
-    def __init__(self, config: LocalModelConfig) -> None:
-        self.config = config
-        try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-        except Exception as exc:  # pragma: no cover - import guidance path
-            raise RuntimeError(
-                "transformers is required for local model runs. Install with: pip install transformers torch"
-            ) from exc
-
-        self._tokenizer = AutoTokenizer.from_pretrained(config.model_id)
-        self._model = AutoModelForCausalLM.from_pretrained(config.model_id)
-        
-        # Detect if model has chat template (instruct/chat models)
-        self._has_chat_template = hasattr(self._tokenizer, 'chat_template') and self._tokenizer.chat_template is not None
-
-    def generate(self, prompt: str) -> str:
-        # Format prompt using chat template if available
-        if self._has_chat_template:
-            formatted_prompt = self._tokenizer.apply_chat_template(
-                [{"role": "user", "content": prompt}],
-                tokenize=False,
-                add_generation_prompt=True
-            )
-        else:
-            formatted_prompt = prompt
-        
-        encoded = self._tokenizer(formatted_prompt, return_tensors="pt")
-        
-        # Prepare stop tokens: use eos_token or common stop strings
-        stop_token_ids = [self._tokenizer.eos_token_id] if self._tokenizer.eos_token_id is not None else []
-        kwargs = {
-            "max_new_tokens": self.config.max_new_tokens,
-            "do_sample": self.config.temperature > 0.0,
-            "temperature": self.config.temperature if self.config.temperature > 0.0 else None,
-            "top_p": self.config.top_p,
-            "repetition_penalty": self.config.repetition_penalty,
-            "no_repeat_ngram_size": self.config.no_repeat_ngram_size,
-            "renormalize_logits": True,
-            "pad_token_id": self._tokenizer.eos_token_id,
-        }
-        
-        # Add stopping criteria: stop at newline after common prompt endings
-        if stop_token_ids:
-            kwargs["eos_token_id"] = stop_token_ids
-        
-        outputs = self._model.generate(**encoded, **kwargs)
-        
-        generated = outputs[0][encoded["input_ids"].shape[1] :]
-        return self._tokenizer.decode(generated, skip_special_tokens=True).strip()
-
-
 def run_local_llm_dataset(
     dataset_path: str,
     session_log_path: str,
     model_config: LocalModelConfig,
-    player_id: str = "pythia14m_local",
+    player_id: str = "ollama_llama3.2_3b_local",
     style: str = "coordinates",
     start_index: int = 0,
     limit: int | None = None,
@@ -112,8 +55,9 @@ def run_local_llm_dataset(
     if not records:
         raise RuntimeError("dataset is empty")
 
-    model = LocalCausalLM(model_config)
+    model = create_chat_backend(model_config)
     encoder = TextBoardEncoder()
+    runtime_base_url = model_config.base_url or ("http://localhost:11434" if model_config.provider == "ollama" else "")
 
     won = 0
     lost = 0
@@ -125,7 +69,9 @@ def run_local_llm_dataset(
     print(
         f"{'='*70}\n"
         f"Starting LLM puzzle evaluation:\n"
+        f"  Provider: {model_config.provider}\n"
         f"  Model: {model_config.model_id}\n"
+        f"  Base URL: {runtime_base_url or '(default)'}\n"
         f"  Dataset: {dataset_path} ({len(records)} puzzles total)\n"
         f"  Processing: puzzles {begin + 1} to {end}\n"
         f"  Player ID: {player_id}\n"
@@ -166,7 +112,11 @@ def run_local_llm_dataset(
             model_output = ""
             attempt_prompt = prompt
             while parse_failures < 2:
-                model_output = model.generate(attempt_prompt)
+                attempt_messages = [
+                    ChatMessage(role="system", content=system_prompt),
+                    ChatMessage(role="user", content=attempt_prompt),
+                ]
+                model_output = model.generate(attempt_messages)
                 parsed = _parse_action(model_output)
                 if parsed is not None:
                     action, coord = parsed
@@ -295,6 +245,7 @@ def run_local_llm_dataset(
             "session_id": _session_id(player_id, record.puzzle_id),
             "puzzle_id": record.puzzle_id,
             "player_id": player_id,
+            "provider": model_config.provider,
             "started_at_utc": started_at,
             "ended_at_utc": ended_at,
             "duration_seconds": duration_seconds,
@@ -309,7 +260,9 @@ def run_local_llm_dataset(
                 "echo_like_outputs": echo_like_outputs,
             },
             "model": {
+                "provider": model_config.provider,
                 "id": model_config.model_id,
+                "base_url": runtime_base_url,
                 "max_new_tokens": model_config.max_new_tokens,
                 "temperature": model_config.temperature,
                 "top_p": model_config.top_p,
@@ -345,6 +298,7 @@ def run_local_llm_dataset(
     return LocalEvalSummary(
         dataset_path=dataset_path,
         session_log_path=session_log_path,
+        provider=model_config.provider,
         model_id=model_config.model_id,
         evaluated=max(0, end - begin),
         won=won,
@@ -395,6 +349,8 @@ def _build_turn_prompt(system_prompt: str, board_text: str, turn: int, reminder:
 def _build_repair_prompt(previous_output: str) -> str:
     return (
         "Your last response could not be parsed as a move.\n"
+        "Here was your last response:\n"
+        f"{previous_output.strip()}\n\n"
         "Return exactly one line in this format: ACTION: [REVEAL|FLAG] [col][row].\n"
         "Do not include any explanation or extra lines.\n\n"
         "Now output exactly one ACTION line."

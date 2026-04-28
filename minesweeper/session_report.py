@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import html
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .dataset import board_from_record, coord_to_position, read_puzzle_dataset
-from .text import TextBoardEncoder
+if __package__ in (None, ""):
+  project_root = Path(__file__).resolve().parents[1]
+  if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+  from minesweeper.dataset import board_from_record, coord_to_position, read_puzzle_dataset
+  from minesweeper.text import TextBoardEncoder
+else:
+  from .dataset import board_from_record, coord_to_position, read_puzzle_dataset
+  from .text import TextBoardEncoder
 
 _BOARD_ENCODER = TextBoardEncoder()
 
@@ -54,7 +62,15 @@ def build_session_dashboard(
 def _read_jsonl_sessions(input_path: str) -> list[dict]:
     path = Path(input_path)
     if not path.exists():
-        raise FileNotFoundError(f"session log not found: {input_path}")
+      # Try resolving relative to the project root (package parent). If still missing,
+      # warn and skip this input rather than raising so dashboards can be built
+      # from a subset of provided files.
+      alt = Path(__file__).resolve().parents[1] / input_path
+      if alt.exists():
+        path = alt
+      else:
+        print(f"Warning: session log not found: {input_path}", file=sys.stderr)
+        return []
 
     sessions: list[dict] = []
     with path.open("r", encoding="utf-8") as handle:

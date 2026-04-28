@@ -169,8 +169,13 @@ def cmd_ui(args: argparse.Namespace) -> int:
 
 
 def cmd_llm_local(args: argparse.Namespace) -> int:
+    base_url = args.base_url or ("http://localhost:11434" if args.provider == "ollama" else "")
     model_config = LocalModelConfig(
+        provider=args.provider,
         model_id=args.model_id,
+        base_url=base_url,
+        api_key=args.api_key,
+        timeout_seconds=args.timeout_seconds,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_p=args.top_p,
@@ -190,7 +195,7 @@ def cmd_llm_local(args: argparse.Namespace) -> int:
         reminder_each_turn=args.reminder_each_turn,
     )
     print(
-        f"Evaluated {summary.evaluated} puzzles with {summary.model_id} | "
+        f"Evaluated {summary.evaluated} puzzles with {summary.provider}:{summary.model_id} | "
         f"won={summary.won} lost={summary.lost} aborted={summary.aborted} | "
         f"log={summary.session_log_path}"
     )
@@ -275,8 +280,12 @@ def build_parser() -> argparse.ArgumentParser:
     llm_local = subparsers.add_parser("llm-local", help="Run local LLM turn loop and log model sessions")
     llm_local.add_argument("--dataset", default="datasets/puzzles.jsonl")
     llm_local.add_argument("--session-log", default="datasets/model_sessions_local.jsonl")
-    llm_local.add_argument("--player-id", default="pythia14m_local")
-    llm_local.add_argument("--model-id", default="EleutherAI/pythia-14m")
+    llm_local.add_argument("--player-id", default="ollama_llama3.2_3b_local")
+    llm_local.add_argument("--provider", choices=["ollama", "openai", "anthropic"], default="ollama")
+    llm_local.add_argument("--model-id", default="llama3.2:3b")
+    llm_local.add_argument("--base-url", default="")
+    llm_local.add_argument("--api-key", default=None)
+    llm_local.add_argument("--timeout-seconds", type=float, default=120.0)
     llm_local.add_argument("--max-new-tokens", type=int, default=32)
     llm_local.add_argument("--temperature", type=float, default=0.0)
     llm_local.add_argument("--top-p", type=float, default=1.0)

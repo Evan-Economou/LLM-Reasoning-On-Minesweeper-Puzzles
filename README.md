@@ -82,16 +82,20 @@ Run a local LLM on the dataset and log model sessions:
 python -m minesweeper llm-local \
   --dataset datasets/puzzles.jsonl \
   --limit 10 \
-  --model-id EleutherAI/pythia-14m \
-  --player-id pythia14m_local \
+  --provider ollama \
+  --model-id llama3.2:3b \
+  --player-id ollama_llama3.2_3b_local \
   --session-log datasets/model_sessions_local.jsonl \
   --include-cot
 ```
 
-This downloads the model specified by --model-id from the huggingface api and runs the first `limit` puzzles from the dataset with it. Pythia-14m was chosen just as a proof of concept that the general program flow is working, but instruction tuned models and larger models will produce better results.
+This uses the provider selected by `--provider` and runs the first `limit` puzzles from the dataset with it. The default configuration now targets a local Ollama server and the `llama3.2:3b` model. The backend is organized so OpenAI or Anthropic can be added later by switching the provider and wiring the corresponding API credentials.
 
 Useful optional flags for `llm-local` for controling hyperparameters:
 
+- `--provider` (default `ollama`): Backend to use. Supported values are `ollama`, `openai`, and `anthropic`.
+- `--base-url` (default empty for API providers): Override the provider endpoint. Ollama defaults to `http://localhost:11434`.
+- `--api-key` (default empty): API key for hosted providers.
 - `--temperature` (default `0.0`): Sampling temperature. Use `0.0` for deterministic decoding, raise it for more randomness.
 - `--top-p` (default `1.0`): Nucleus sampling threshold. Lower values restrict generation to higher-probability tokens.
 - `--max-new-tokens` (default `32`): Maximum tokens generated per turn, more than the default shouldn't be necessary.
