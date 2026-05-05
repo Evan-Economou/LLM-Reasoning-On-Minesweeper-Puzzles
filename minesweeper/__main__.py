@@ -8,7 +8,7 @@ if __package__ in (None, ""):
     project_root = Path(__file__).resolve().parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    from llm_runner.local_eval import LocalModelConfig, run_local_llm_dataset
+    from llm_runner.model_eval import ModelEvalConfig, run_model_llm_dataset
     from minesweeper.dataset import build_puzzle_record, board_from_record, read_puzzle_dataset, write_puzzle_dataset
     from minesweeper.evaluate import evaluate_dataset
     from minesweeper.generator import DeterministicPuzzleGenerator
@@ -18,7 +18,7 @@ if __package__ in (None, ""):
     from minesweeper.text import TextBoardEncoder
     from minesweeper.variants import AVAILABLE_VARIANTS, get_variant
 else:
-    from llm_runner.local_eval import LocalModelConfig, run_local_llm_dataset
+    from llm_runner.model_eval import ModelEvalConfig, run_model_llm_dataset
     from .dataset import build_puzzle_record, board_from_record, read_puzzle_dataset, write_puzzle_dataset
     from .evaluate import evaluate_dataset
     from .generator import DeterministicPuzzleGenerator
@@ -168,9 +168,9 @@ def cmd_ui(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_llm_local(args: argparse.Namespace) -> int:
+def cmd_llm_eval(args: argparse.Namespace) -> int:
     base_url = args.base_url or ("http://localhost:11434" if args.provider == "ollama" else "")
-    model_config = LocalModelConfig(
+    model_config = ModelEvalConfig(
         provider=args.provider,
         model_id=args.model_id,
         base_url=base_url,
@@ -182,7 +182,7 @@ def cmd_llm_local(args: argparse.Namespace) -> int:
         repetition_penalty=args.repetition_penalty,
         no_repeat_ngram_size=args.no_repeat_ngram_size,
     )
-    summary = run_local_llm_dataset(
+    summary = run_model_llm_dataset(
         dataset_path=args.dataset,
         session_log_path=args.session_log,
         model_config=model_config,
@@ -277,30 +277,34 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--window-height", type=int, default=700)
     ui.set_defaults(func=cmd_ui)
 
-    llm_local = subparsers.add_parser("llm-local", help="Run local LLM turn loop and log model sessions")
-    llm_local.add_argument("--dataset", default="datasets/puzzles.jsonl")
-    llm_local.add_argument("--session-log", default="datasets/model_sessions_local.jsonl")
-    llm_local.add_argument("--player-id", default="ollama_llama3.2_3b_local")
-    llm_local.add_argument("--provider", choices=["ollama", "openai", "anthropic"], default="ollama")
-    llm_local.add_argument("--model-id", default="llama3.2:3b")
-    llm_local.add_argument("--base-url", default="")
-    llm_local.add_argument("--api-key", default=None)
-    llm_local.add_argument("--timeout-seconds", type=float, default=120.0)
-    llm_local.add_argument("--max-new-tokens", type=int, default=32)
-    llm_local.add_argument("--temperature", type=float, default=0.0)
-    llm_local.add_argument("--top-p", type=float, default=1.0)
-    llm_local.add_argument("--repetition-penalty", type=float, default=1.12)
-    llm_local.add_argument("--no-repeat-ngram-size", type=int, default=4)
-    llm_local.add_argument("--style", choices=["coordinates", "flat", "narrative"], default="coordinates")
-    llm_local.add_argument("--start-index", type=int, default=0)
-    llm_local.add_argument("--limit", type=int, default=1)
-    llm_local.add_argument("--max-turn-multiplier", type=int, default=3)
-    llm_local.add_argument("--include-cot", action="store_true")
-    llm_local.add_argument("--reminder-each-turn", action="store_true")
-    llm_local.set_defaults(func=cmd_llm_local)
+    llm_eval = subparsers.add_parser(
+        "llm-eval",
+        aliases=["llm-local"],
+        help="Run provider-backed model turn loop and log model sessions",
+    )
+    llm_eval.add_argument("--dataset", default="datasets/puzzles.jsonl")
+    llm_eval.add_argument("--session-log", default="datasets/model_sessions.jsonl")
+    llm_eval.add_argument("--player-id", default="model_runner")
+    llm_eval.add_argument("--provider", choices=["ollama", "openai", "anthropic"], default="ollama")
+    llm_eval.add_argument("--model-id", default="llama3.2:3b")
+    llm_eval.add_argument("--base-url", default="")
+    llm_eval.add_argument("--api-key", default=None)
+    llm_eval.add_argument("--timeout-seconds", type=float, default=120.0)
+    llm_eval.add_argument("--max-new-tokens", type=int, default=32)
+    llm_eval.add_argument("--temperature", type=float, default=0.0)
+    llm_eval.add_argument("--top-p", type=float, default=1.0)
+    llm_eval.add_argument("--repetition-penalty", type=float, default=1.12)
+    llm_eval.add_argument("--no-repeat-ngram-size", type=int, default=4)
+    llm_eval.add_argument("--style", choices=["coordinates", "flat", "narrative"], default="coordinates")
+    llm_eval.add_argument("--start-index", type=int, default=0)
+    llm_eval.add_argument("--limit", type=int, default=1)
+    llm_eval.add_argument("--max-turn-multiplier", type=int, default=3)
+    llm_eval.add_argument("--include-cot", action="store_true")
+    llm_eval.add_argument("--reminder-each-turn", action="store_true")
+    llm_eval.set_defaults(func=cmd_llm_eval)
 
     session_report = subparsers.add_parser("session-report", help="Build an interactive HTML dashboard from session JSONL logs")
-    session_report.add_argument("--input", nargs="+", default=["datasets/model_sessions_local.jsonl"])
+    session_report.add_argument("--input", nargs="+", default=["datasets/model_sessions.jsonl"])
     session_report.add_argument("--output", default="datasets/session_dashboard.html")
     session_report.add_argument("--title", default="Minesweeper Session Dashboard")
     session_report.set_defaults(func=cmd_session_report)
@@ -319,6 +323,7 @@ def main() -> None:
         "play-all",
         "evaluate",
         "ui",
+        "llm-eval",
         "llm-local",
         "session-report",
         "-h",

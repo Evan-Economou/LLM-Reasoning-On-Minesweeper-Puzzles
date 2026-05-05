@@ -3,7 +3,7 @@
 ## Repo Map
 
 - [minesweeper/](minesweeper/) - Core handling of game logic. Includes puzzle generation, and play session recording and evaluation.
-- [llm_runner/](llm_runner/) - Local LLM evaluation helpers and runner utilities.
+- [llm_runner/](llm_runner/) - Provider-backed model evaluation helpers and runner utilities.
 - [writeup.md](writeup.md) - Project writeup and results.
 - [pyproject.toml](pyproject.toml) - Package metadata, dependencies, and script definitions.
 
@@ -74,24 +74,24 @@ python -m minesweeper ui \
 
 Session records are appended to the file specified in --session-log, in this case it's `datasets/control_sessions.jsonl`.
 
-### 4. Run a local LLM to Solve Puzzles
+### 4. Run an LLM/API Model to Solve Puzzles
 
-Run a local LLM on the dataset and log model sessions:
+Run a provider-backed model on the dataset and log model sessions:
 
 ```bash
-python -m minesweeper llm-local \
+python -m minesweeper llm-eval \
   --dataset datasets/puzzles.jsonl \
   --limit 10 \
   --provider ollama \
   --model-id llama3.2:3b \
-  --player-id ollama_llama3.2_3b_local \
-  --session-log datasets/model_sessions_local.jsonl \
+  --player-id model_runner \
+  --session-log datasets/model_sessions.jsonl \
   --include-cot
 ```
 
-This uses the provider selected by `--provider` and runs the first `limit` puzzles from the dataset with it. The default configuration now targets a local Ollama server and the `llama3.2:3b` model. The backend is organized so OpenAI or Anthropic can be added later by switching the provider and wiring the corresponding API credentials.
+This uses the provider selected by `--provider` and runs the first `limit` puzzles from the dataset with it. The default configuration targets an Ollama server and the `llama3.2:3b` model, but the same command also supports hosted providers like OpenAI and Anthropic. The older `llm-local` subcommand remains as an alias for backward compatibility.
 
-Useful optional flags for `llm-local` for controling hyperparameters:
+Useful optional flags for `llm-eval` for controling hyperparameters:
 
 - `--provider` (default `ollama`): Backend to use. Supported values are `ollama`, `openai`, and `anthropic`.
 - `--base-url` (default empty for API providers): Override the provider endpoint. Ollama defaults to `http://localhost:11434`.
@@ -109,9 +109,17 @@ Useful optional flags for `llm-local` for controling hyperparameters:
 - `--reminder-each-turn` (flag, default off): Repeats the variant constraint text on every turn prompt.
 
 
-### 5. Run an LLM Agent through an API
+### 5. Run an API-Hosted Model (Example)
 
-Coming soon, to a repo near you
+```bash
+python -m minesweeper llm-eval \
+  --dataset datasets/puzzles.jsonl \
+  --limit 10 \
+  --provider anthropic \
+  --model-id claude-3-5-haiku-latest \
+  --api-key "$ANTHROPIC_API_KEY" \
+  --session-log datasets/model_sessions.jsonl
+```
 
 ## Session Reporting
 
@@ -119,7 +127,7 @@ Build an HTML dashboard from one or more session logs:
 
 ```bash
 python -m minesweeper session-report \
-  --input datasets/model_sessions_local.jsonl datasets/control_sessions.jsonl datasets/human_sessions.jsonl \
+  --input datasets/model_sessions.jsonl datasets/control_sessions.jsonl datasets/human_sessions.jsonl \
   --output datasets/session_dashboard.html
 ```
 

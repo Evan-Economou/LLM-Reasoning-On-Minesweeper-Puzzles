@@ -13,14 +13,12 @@ dependencies = [
 
 [project.optional-dependencies]
 llm = [
-	"openai>=1.30",
 	"anthropic>=0.45",
 ]
 pygame = [
 	"pygame>=2.5",
 ]
 all = [
-	"openai>=1.30",
 	"anthropic>=0.45",
 	"pygame>=2.5",
 ]

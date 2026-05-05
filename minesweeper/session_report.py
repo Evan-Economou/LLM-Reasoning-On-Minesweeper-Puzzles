@@ -175,6 +175,7 @@ def _build_board_progression(session: dict, puzzle_record: object) -> list[dict[
                     "turn": turn,
                     "action": action or "-",
                     "coordinate": coordinate or "-",
+                  "reasoning": move.get("reasoning") or "-",
                     "status_after": move.get("status_after") or "-",
                     "changed": bool(move.get("changed")),
                     "hit_mine": bool(move.get("hit_mine")),
@@ -1008,6 +1009,7 @@ def _render_dashboard_html(
       const moveRows = (s.moves || []).map((move) => {
         const action = move.action || '-';
         const coordinate = move.coordinate || '-';
+        const reasoning = move.reasoning || '';
         const changed = move.changed ? 'yes' : 'no';
         const hitMine = move.hit_mine ? 'yes' : 'no';
         const status = move.status_after || '-';
@@ -1022,6 +1024,7 @@ def _render_dashboard_html(
             <td>${escapeHtml(String(turn))}</td>
             <td>${escapeHtml(action)}</td>
             <td>${escapeHtml(coordinate)}</td>
+            <td>${escapeHtml(reasoning)}</td>
             <td>${escapeHtml(changed)}</td>
             <td>${escapeHtml(hitMine)}</td>
             <td>${escapeHtml(status)}</td>
@@ -1048,6 +1051,7 @@ def _render_dashboard_html(
                     <div class="code">${escapeHtml(output || '(none)')}</div>
                   </div>
                 </div>
+                <div class="kv">Parsed reasoning recorded by evaluator: ${escapeHtml(String(move.reasoning || '-'))}</div>
               </details>
             </td>
           </tr>
@@ -1070,7 +1074,7 @@ def _render_dashboard_html(
           <table>
             <thead>
               <tr>
-                <th>Turn</th><th>Action</th><th>Coord</th><th>Changed</th><th>Hit Mine</th><th>Status</th><th>Error / Failure</th>
+                <th>Turn</th><th>Action</th><th>Coord</th><th>Reasoning</th><th>Changed</th><th>Hit Mine</th><th>Status</th><th>Error / Failure</th>
               </tr>
             </thead>
             <tbody>${moveRows || '<tr><td colspan="7">No move records.</td></tr>'}</tbody>

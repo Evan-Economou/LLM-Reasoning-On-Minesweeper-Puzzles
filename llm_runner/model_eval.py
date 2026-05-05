@@ -14,21 +14,23 @@ from minesweeper.evaluate import solve_with_trace
 from minesweeper.text import TextBoardEncoder
 from .model_backends import ChatMessage, ChatModelConfig, create_chat_backend
 
-_ACTION_LINE_RE = re.compile(r"^\s*ACTION\s*:\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
-_BARE_ACTION_LINE_RE = re.compile(r"^\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
+_ACTION_LINE_RE = re.compile(r"^\s*(?:ACTION|Action)\s*:\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
+_BARE_ACTION_LINE_RE = re.compile(r"^\s*(REVEAL|FLAG|Reveal|Flag)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
 _PROMPT_ECHO_RE = re.compile(
     r"(your previous output could not be parsed|output format\s*:|action\s*:\s*\[reveal\|flag\]|respond now\.)",
     re.IGNORECASE,
 )
 # More tolerant action parsing: allows variations like "REVEAL A1", "ACTION: REVEAL A1", "A1 REVEAL"
-_FLEXIBLE_ACTION_RE = re.compile(r"(REVEAL|FLAG)\s+([A-Za-z]\d+)", re.IGNORECASE)
+_FLEXIBLE_ACTION_RE = re.compile(r"(REVEAL|FLAG|Reveal|Flag)\s+([A-Za-z]\d+)", re.IGNORECASE)
+_REASONING_LINE_RE = re.compile(r"^\s*REASONING\s*:\s*(.*)$", re.IGNORECASE)
 
 
-LocalModelConfig = ChatModelConfig
+ModelEvalConfig = ChatModelConfig
+LocalModelConfig = ModelEvalConfig
 
 
 @dataclass(frozen=True, slots=True)
-class LocalEvalSummary:
+class ModelEvalSummary:
     dataset_path: str
     session_log_path: str
     provider: str
@@ -39,18 +41,18 @@ class LocalEvalSummary:
     aborted: int
 
 
-def run_local_llm_dataset(
+def run_model_llm_dataset(
     dataset_path: str,
     session_log_path: str,
-    model_config: LocalModelConfig,
-    player_id: str = "ollama_llama3.2_3b_local",
+    model_config: ModelEvalConfig,
+    player_id: str = "model",
     style: str = "coordinates",
     start_index: int = 0,
     limit: int | None = None,
     max_turn_multiplier: int = 3,
     include_cot: bool = True,
     reminder_each_turn: bool = False,
-) -> LocalEvalSummary:
+) -> ModelEvalSummary:
     records = read_puzzle_dataset(dataset_path)
     if not records:
         raise RuntimeError("dataset is empty")
@@ -102,6 +104,7 @@ def run_local_llm_dataset(
                 system_prompt=system_prompt,
                 board_text=board_text,
                 turn=turn,
+                history=moves,
                 reminder=variant.description if reminder_each_turn else None,
             )
 
@@ -109,6 +112,7 @@ def run_local_llm_dataset(
             parse_failure_modes: list[str] = []
             action = None
             coord = None
+            parsed_reasoning: str | None = None
             model_output = ""
             attempt_prompt = prompt
             while parse_failures < 2:
@@ -119,7 +123,7 @@ def run_local_llm_dataset(
                 model_output = model.generate(attempt_messages)
                 parsed = _parse_action(model_output)
                 if parsed is not None:
-                    action, coord = parsed
+                    action, coord, parsed_reasoning = parsed
                     prompt = attempt_prompt
                     break
                 mode = _classify_unparsed_output(model_output)
@@ -146,6 +150,7 @@ def run_local_llm_dataset(
                         "model_output": model_output,
                         "action": None,
                         "coordinate": None,
+                        "reasoning": parsed_reasoning,
                         "changed": False,
                         "hit_mine": False,
                         "status_after": board.status.value,
@@ -175,6 +180,7 @@ def run_local_llm_dataset(
                             "model_output": model_output,
                             "action": action,
                             "coordinate": coord,
+                            "reasoning": parsed_reasoning,
                             "changed": False,
                             "hit_mine": False,
                             "status_after": board.status.value,
@@ -191,6 +197,7 @@ def run_local_llm_dataset(
                         "model_output": model_output,
                         "action": action,
                         "coordinate": coord,
+                        "reasoning": parsed_reasoning,
                         "changed": outcome.changed,
                         "hit_mine": outcome.hit_mine,
                         "status_after": board.status.value,
@@ -216,6 +223,7 @@ def run_local_llm_dataset(
                         "model_output": model_output,
                         "action": action,
                         "coordinate": coord,
+                        "reasoning": parsed_reasoning,
                         "changed": False,
                         "hit_mine": False,
                         "status_after": board.status.value,
@@ -295,7 +303,7 @@ def run_local_llm_dataset(
         f"{'='*70}"
     )
 
-    return LocalEvalSummary(
+    return ModelEvalSummary(
         dataset_path=dataset_path,
         session_log_path=session_log_path,
         provider=model_config.provider,
@@ -307,42 +315,82 @@ def run_local_llm_dataset(
     )
 
 
+LocalEvalSummary = ModelEvalSummary
+
+
+def run_local_llm_dataset(
+    dataset_path: str,
+    session_log_path: str,
+    model_config: LocalModelConfig,
+    player_id: str = "model_runner",
+    style: str = "coordinates",
+    start_index: int = 0,
+    limit: int | None = None,
+    max_turn_multiplier: int = 3,
+    include_cot: bool = True,
+    reminder_each_turn: bool = False,
+) -> ModelEvalSummary:
+    # Backward-compatible alias for older imports.
+    return run_model_llm_dataset(
+        dataset_path=dataset_path,
+        session_log_path=session_log_path,
+        model_config=model_config,
+        player_id=player_id,
+        style=style,
+        start_index=start_index,
+        limit=limit,
+        max_turn_multiplier=max_turn_multiplier,
+        include_cot=include_cot,
+        reminder_each_turn=reminder_each_turn,
+    )
+
+
 def _build_system_prompt(variant_code: str, variant_name: str, variant_description: str, include_cot: bool) -> str:
     reasoning_instruction = (
-        "Think step by step briefly, then provide the action line."
+        "For each move, provide reasoning and then the action.\nFormat exactly as:\nReasoning: <brief reasoning>\nAction: [REVEAL|FLAG] <col><row>"
         if include_cot
-        else "Do not include reasoning. Provide only the action line."
+        else "Do NOT include in-depth chain-of-thought. Provide a concise one-line Reasoning and the Action lines as shown."
     )
     return (
-        "You are solving a Minesweeper puzzle. Standard Minesweeper rules apply.\n"
+        "Rules: Standard Minesweeper rules apply. You may only REVEAL or FLAG a single cell each turn.\n"
         f"Variant [{variant_code}] - {variant_name}: {variant_description}\n"
+        "Action Types:\n"
+        "  - Reasoning: A brief sentence or two explaining why you choose the move.\n"
+        "  - Action: Use one of ACTION: REVEAL <col><row> or ACTION: FLAG <col><row> (columns are letters, rows are numbers).\n"
         f"{reasoning_instruction}\n"
-        "Output format: ACTION: [REVEAL|FLAG] [col][row]\n"
         "Examples:\n"
         "```\n"
-        "ACTION: REVEAL A1\n"
+        "Reasoning: The only safe cell adjacent to a '1' is A1, so reveal it.\n"
+        "Action: ACTION: REVEAL A1\n"
         "```\n"
         "```\n"
-        "ACTION: FLAG C3\n"
-        "```"
-        "\n"
+        "Reasoning: This cell must be a mine because all others around the clue are accounted for.\n"
+        "Action: ACTION: FLAG C3\n"
         "```\n"
-        "ACTION: REVEAL E5\n"
-        "```\n"
-        "```\n"
-        "ACTION: FLAG B4\n"
-        "```"
     )
 
 
-def _build_turn_prompt(system_prompt: str, board_text: str, turn: int, reminder: str | None) -> str:
+def _build_turn_prompt(system_prompt: str, board_text: str, turn: int, history: list[dict], reminder: str | None) -> str:
     pieces = [system_prompt]
     if reminder:
         pieces.append(f"Constraint reminder: {reminder}")
     pieces.append(f"Turn: {turn}")
+    # Action history (previous moves)
+    pieces.append("Action History:")
+    if history:
+        hist_lines: list[str] = []
+        for m in history:
+            r = m.get("reasoning") or ""
+            a = m.get("action") or m.get("model_output") or ""
+            coord = m.get("coordinate") or ""
+            hist_lines.append(f"Turn {m.get('turn')}: Reasoning: {r} Action: {a} {coord}")
+        pieces.append("\n".join(hist_lines))
+    else:
+        pieces.append("(none)")
+
     pieces.append("Current board:")
     pieces.append(board_text)
-    pieces.append("Respond now.")
+    pieces.append("Respond now. For this turn return exactly two lines: 'Reasoning: ...' then 'Action: ACTION: REVEAL|FLAG <col><row>'")
     return "\n\n".join(pieces)
 
 
@@ -351,36 +399,65 @@ def _build_repair_prompt(previous_output: str) -> str:
         "Your last response could not be parsed as a move.\n"
         "Here was your last response:\n"
         f"{previous_output.strip()}\n\n"
-        "Return exactly one line in this format: ACTION: [REVEAL|FLAG] [col][row].\n"
-        "Do not include any explanation or extra lines.\n\n"
-        "Now output exactly one ACTION line."
+        "Please return exactly two lines in this format:\n"
+        "Reasoning: <one short sentence>\n"
+        "Action: ACTION: [REVEAL|FLAG] [col][row]\n\n"
+        "Do not include extra text or code blocks.\n\n"
+        "Now output the two lines as described."
     )
 
 
-def _parse_action(text: str) -> tuple[str, str] | None:
-    # Parse only full standalone lines (prefer the final line), so echoed prompt text
-    # like "format: ACTION: ..." is not mistaken for the model's actual move.
+def _parse_action(text: str) -> tuple[str, str, str] | None:
+    # Parse only full standalone lines (prefer the final lines). Expect two lines:
+    # Reasoning: ...\nAction: ACTION: REVEAL A1
     lines = [line for line in text.splitlines() if line.strip()]
-    
-    for line in reversed(lines):
-        # Strict format: "ACTION: REVEAL A1" or similar
-        match = _ACTION_LINE_RE.match(line)
-        if match:
-            return match.group(1).upper(), match.group(2).upper()
-        
-        # Bare format: "REVEAL A1"
-        fallback = _BARE_ACTION_LINE_RE.match(line)
-        if fallback:
-            return fallback.group(1).upper(), fallback.group(2).upper()
-        
-        # Flexible format: allows more variations like "A1 REVEAL" or "Reveal A1"
-        # But skip lines that look like prompt echoes
+    if not lines:
+        return None
+
+    # Find the last line that contains an action
+    action_idx = None
+    action_match = None
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i]
+        if _ACTION_LINE_RE.match(line) or _BARE_ACTION_LINE_RE.match(line):
+            action_idx = i
+            action_match = lines[i]
+            break
         if not _PROMPT_ECHO_RE.search(line):
             flexible = _FLEXIBLE_ACTION_RE.search(line)
             if flexible:
-                return flexible.group(1).upper(), flexible.group(2).upper()
-    
-    return None
+                action_idx = i
+                action_match = lines[i]
+                break
+
+    if action_idx is None:
+        return None
+
+    # Parse action and coord from the matched line
+    m = _ACTION_LINE_RE.match(action_match)
+    if m:
+        act, coord = m.group(1).upper(), m.group(2).upper()
+    else:
+        m2 = _BARE_ACTION_LINE_RE.match(action_match)
+        if m2:
+            act, coord = m2.group(1).upper(), m2.group(2).upper()
+        else:
+            flex = _FLEXIBLE_ACTION_RE.search(action_match)
+            if flex:
+                act, coord = flex.group(1).upper(), flex.group(2).upper()
+            else:
+                return None
+
+    # Extract reasoning: look for a preceding line starting with 'Reasoning:'
+    reasoning = ""
+    for j in range(action_idx - 1, -1, -1):
+        rl = lines[j]
+        rr = _REASONING_LINE_RE.match(rl)
+        if rr:
+            reasoning = rr.group(1).strip()
+            break
+
+    return act, coord, reasoning
 
 
 def _classify_unparsed_output(text: str) -> str:
