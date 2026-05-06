@@ -137,3 +137,62 @@ This coalesces all of the listed session reports and builds an html dashboard to
 ## Notes
 
 - Dataset files are JSONL, with one puzzle/session per line.
+
+
+
+                                                                                                                                                        
+  ---                                                                                                                                                      
+  Stage 1 — Pilot: 1 puzzle/variant, no CoT (12 total)
+  python -m minesweeper llm-eval \
+    --dataset docs/puzzles.jsonl \
+    --limit 12 --provider anthropic --model-id claude-haiku-4-5-20251001 \
+    --api-key "$ANTHROPIC_API_KEY" \
+    --player-id haiku_pilot \
+    --session-log docs/haiku_pilot_sessions.jsonl
+                                                                                                                                                           
+  ---                                                                                                                                                      
+  Stage 2 — Haiku baseline: 5 puzzles/variant, no CoT (60 total)                                                                                         
+  python -m minesweeper llm-eval \
+    --dataset docs/puzzles.jsonl \
+    --limit 60 --provider anthropic --model-id claude-haiku-4-5-20251001 \
+    --api-key "$ANTHROPIC_API_KEY" \
+    --player-id haiku_baseline \
+    --session-log docs/haiku_baseline_sessions.jsonl
+                                                                                                                                                           
+  ---                                                                                                                                                      
+  Stage 3 — Haiku with CoT: 5 puzzles/variant (60 total)
+  python -m minesweeper llm-eval \
+    --dataset docs/puzzles.jsonl \
+    --limit 60 --provider anthropic --model-id claude-haiku-4-5-20251001 \
+    --api-key "$ANTHROPIC_API_KEY" \                                      
+    --player-id haiku_cot \
+    --session-log docs/haiku_cot_sessions.jsonl \
+    --include-cot                                    
+                                                                                                                                                           
+  ---                                                                                                                                                    
+  Stage 4 — Sonnet comparison: 5 puzzles/variant (60 total)                                                                                                
+  python -m minesweeper llm-eval \
+    --dataset docs/puzzles.jsonl \
+    --limit 60 --provider anthropic --model-id claude-sonnet-4-6 \
+    --api-key "$ANTHROPIC_API_KEY" \
+    --player-id sonnet_baseline \
+    --session-log docs/sonnet_baseline_sessions.jsonl
+                                                                                                                                                           
+  ---
+  Deterministic solver baseline (free, run once)                                                                                                           
+  python -m minesweeper evaluate \
+    --dataset docs/puzzles.jsonl \
+    --player-id deterministic_solver \
+    --session-log docs/control_sessions.jsonl
+   
+  ---                                                                                                                                                      
+  Build dashboard from all session logs                                                                                                                  
+  python -m minesweeper session-report \
+    --input docs/control_sessions.jsonl \
+             docs/haiku_pilot_sessions.jsonl \
+             docs/haiku_baseline_sessions.jsonl \
+             docs/haiku_cot_sessions.jsonl \     
+             docs/sonnet_baseline_sessions.jsonl \
+    --output docs/session_dashboard.html
+   
+  ---
