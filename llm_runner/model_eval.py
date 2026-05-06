@@ -105,7 +105,6 @@ def run_model_llm_dataset(
 
             board_text = encoder.render(board, variant=variant, style=style)
             prompt = _build_turn_prompt(
-                system_prompt=system_prompt,
                 board_text=board_text,
                 turn=turn,
                 history=moves,
@@ -399,8 +398,8 @@ def _build_system_prompt(variant_code: str, variant_name: str, variant_descripti
     )
 
 
-def _build_turn_prompt(system_prompt: str, board_text: str, turn: int, history: list[dict], reminder: str | None) -> str:
-    pieces = [system_prompt]
+def _build_turn_prompt(board_text: str, turn: int, history: list[dict], reminder: str | None) -> str:
+    pieces = []
     if reminder:
         pieces.append(f"Constraint reminder: {reminder}")
     pieces.append(f"Turn: {turn}")
