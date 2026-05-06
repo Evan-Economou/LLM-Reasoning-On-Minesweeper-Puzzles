@@ -73,6 +73,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _progress_bar(done: int, total: int, label: str, width: int = 40) -> str:
+    filled = int(width * done / total) if total else width
+    bar = "=" * filled + "-" * (width - filled)
+    pct = int(100 * done / total) if total else 100
+    return f"\r[{bar}] {done}/{total} ({pct:3d}%) {label}"
+
+
 def cmd_dataset_build(args: argparse.Namespace) -> int:
     variants = [value.strip().upper() for value in args.variants]
     for variant_code in variants:
@@ -80,7 +87,10 @@ def cmd_dataset_build(args: argparse.Namespace) -> int:
             raise ValueError(f"unknown variant code: {variant_code}")
 
     mine_overrides = _parse_variant_mine_overrides(args.variant_mines)
-    all_records = []
+    total = len(variants) * args.count_per_variant
+    records_by_variant: dict[str, list] = {v: [] for v in variants}
+    done = 0
+
     for variant_index, variant_code in enumerate(variants):
         variant = get_variant(variant_code)
         mine_count = mine_overrides.get(variant_code, args.mines)
@@ -93,11 +103,65 @@ def cmd_dataset_build(args: argparse.Namespace) -> int:
                 seed=seed,
                 max_attempts=args.max_attempts,
             )
-            generated = generator.generate()
-            all_records.append(build_puzzle_record(generated))
+            try:
+                generated = generator.generate()
+                records_by_variant[variant_code].append(build_puzzle_record(generated))
+            except RuntimeError:
+                pass
+            done += 1
+            print(_progress_bar(done, total, variant_code), end="", flush=True)
 
+    print()
+
+    # Retry pass: fill in any variants that fell short of count_per_variant.
+    short_variants = [
+        (vi, vc)
+        for vi, vc in enumerate(variants)
+        if len(records_by_variant[vc]) < args.count_per_variant
+    ]
+    if short_variants:
+        total_short = sum(args.count_per_variant - len(records_by_variant[vc]) for _, vc in short_variants)
+        print(f"\nRetrying {total_short} failed slot(s) across {len(short_variants)} variant(s)...")
+        retry_done = 0
+        for variant_index, variant_code in short_variants:
+            variant = get_variant(variant_code)
+            mine_count = mine_overrides.get(variant_code, args.mines)
+            needed = args.count_per_variant - len(records_by_variant[variant_code])
+            found = 0
+            # Use a seed range well past the first pass to avoid duplicates.
+            for attempt_offset in range(needed * 20):
+                if found >= needed:
+                    break
+                seed = args.seed + 10_000_000 + variant_index * 1_000_003 + attempt_offset * 997
+                generator = DeterministicPuzzleGenerator(
+                    size=args.size,
+                    mine_count=mine_count,
+                    variant=variant,
+                    seed=seed,
+                    max_attempts=args.max_attempts,
+                )
+                try:
+                    generated = generator.generate()
+                    records_by_variant[variant_code].append(build_puzzle_record(generated))
+                    found += 1
+                    retry_done += 1
+                    print(_progress_bar(retry_done, total_short, f"{variant_code} retry"), end="", flush=True)
+                except RuntimeError:
+                    pass
+        print()
+
+    all_records = [record for vc in variants for record in records_by_variant[vc]]
     write_puzzle_dataset(all_records, args.output, append=args.append)
     print(f"Wrote {len(all_records)} puzzles to {args.output}")
+
+    for variant_code in variants:
+        got = len(records_by_variant[variant_code])
+        if got < args.count_per_variant:
+            print(
+                f"  WARNING: {variant_code} only generated {got}/{args.count_per_variant} puzzles — "
+                f"try increasing --max-attempts or adjusting --variant-mines {variant_code}=N"
+            )
+
     return 0
 
 
@@ -296,8 +360,19 @@ def build_parser() -> argparse.ArgumentParser:
     llm_eval.add_argument("--repetition-penalty", type=float, default=1.12)
     llm_eval.add_argument("--no-repeat-ngram-size", type=int, default=4)
     llm_eval.add_argument("--style", choices=["coordinates", "numeric", "flat", "narrative"], default="numeric")
-    llm_eval.add_argument("--start-index", type=int, default=0)
-    llm_eval.add_argument("--limit", type=int, default=1)
+    llm_eval.add_argument(
+        "--start-index",
+        type=int,
+        default=0,
+        help="Within each variant's puzzle group, skip this many puzzles before starting (0-indexed).",
+    )
+    llm_eval.add_argument(
+        "--limit",
+        type=int,
+        default=1,
+        help="Maximum number of puzzles to evaluate per variant. Combined with --start-index, "
+             "selects puzzles [start_index, start_index+limit) within each variant's group.",
+    )
     llm_eval.add_argument("--max-turn-multiplier", type=int, default=3)
     llm_eval.add_argument("--include-cot", action="store_true")
     llm_eval.add_argument("--reminder-each-turn", action="store_true")

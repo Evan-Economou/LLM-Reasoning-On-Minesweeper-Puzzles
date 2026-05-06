@@ -35,11 +35,12 @@ python -m minesweeper <subcommand>
 Generate reusable puzzles across variants into JSONL:
 
 ```bash
-python -m minesweeper dataset-build \
-  --output datasets/puzzles.jsonl \
-  --variants STD Q C L P X \
-  --count-per-variant 10 \
-  --variant-mines Q=8 C=6 L=6 P=6 X=6
+python -m minesweeper dataset-build 
+  --output datasets/puzzles.jsonl 
+  --variants STD Q C T O D S R H P L X 
+  --count-per-variant 50 
+  --variant-mines Q=8 C=6 D=6 L=6 P=6 X=6 
+  --max-attempts 2000
 ```
 
 Inspect what was generated:

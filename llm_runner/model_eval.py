@@ -69,8 +69,20 @@ def run_model_llm_dataset(
     lost = 0
     aborted = 0
 
+    # Group records by variant, preserving dataset order within each group.
+    variant_groups: dict[str, list] = {}
+    for record in records:
+        variant_groups.setdefault(record.variant_code, []).append(record)
+
+    # Select up to `limit` records per variant starting at `start_index`.
     begin = max(start_index, 0)
-    end = len(records) if limit is None else min(len(records), begin + limit)
+    selected_records = []
+    for group in variant_groups.values():
+        end_idx = len(group) if limit is None else min(len(group), begin + limit)
+        selected_records.extend(group[begin:end_idx])
+
+    total_selected = len(selected_records)
+    per_variant_desc = f"puzzles {begin + 1}–{begin + limit}" if limit is not None else f"all puzzles from index {begin}"
 
     print(
         f"{'='*70}\n"
@@ -79,12 +91,12 @@ def run_model_llm_dataset(
         f"  Model: {model_config.model_id}\n"
         f"  Base URL: {runtime_base_url or '(default)'}\n"
         f"  Dataset: {dataset_path} ({len(records)} puzzles total)\n"
-        f"  Processing: puzzles {begin + 1} to {end}\n"
+        f"  Processing: {per_variant_desc} of each variant ({total_selected} puzzles total)\n"
         f"  Player ID: {player_id}\n"
         f"{'='*70}\n"
     )
 
-    for idx, record in enumerate(records[begin:end], start=begin + 1):
+    for idx, record in enumerate(selected_records, start=1):
         board, variant = board_from_record(record)
         started_at = _now_iso()
         start_clock = monotonic()
@@ -291,12 +303,12 @@ def run_model_llm_dataset(
         # Progress output
         outcome = "WON" if won_flag else "LOST" if lost_flag else "ABORTED"
         print(
-            f"[{idx}/{end - begin}] {record.puzzle_id:12} ({variant.code:2}) {outcome:12} "
+            f"[{idx}/{total_selected}] {record.puzzle_id:12} ({variant.code:2}) {outcome:12} "
             f"moves={len(moves):2} time={duration_seconds:6.2f}s"
         )
 
     # Final summary
-    total_evaluated = max(0, end - begin)
+    total_evaluated = total_selected
     win_rate = (won / total_evaluated * 100) if total_evaluated > 0 else 0
     print(
         f"\n{'='*70}\n"
