@@ -110,6 +110,8 @@ def run_model_llm_dataset(
         final_failure_category: str | None = None
         parse_fail_turns = 0
         echo_like_outputs = 0
+        session_input_tokens = 0
+        session_output_tokens = 0
 
         for turn in range(1, turn_limit + 1):
             if board.status != GameStatus.IN_PROGRESS:
@@ -130,12 +132,18 @@ def run_model_llm_dataset(
             parsed_reasoning: str | None = None
             model_output = ""
             attempt_prompt = prompt
+            turn_input_tokens = 0
+            turn_output_tokens = 0
             while parse_failures < 2:
                 attempt_messages = [
                     ChatMessage(role="system", content=system_prompt),
                     ChatMessage(role="user", content=attempt_prompt),
                 ]
-                model_output = model.generate(attempt_messages)
+                result = model.generate(attempt_messages)
+                model_output = result.text
+                if result.usage:
+                    turn_input_tokens += result.usage.get("input_tokens", 0)
+                    turn_output_tokens += result.usage.get("output_tokens", 0)
                 parsed = _parse_action(model_output)
                 if parsed is not None:
                     action, coord, parsed_reasoning = parsed
@@ -149,6 +157,10 @@ def run_model_llm_dataset(
                 if parse_failures < 2:
                     attempt_prompt = _build_repair_prompt(model_output)
                     prompt = attempt_prompt
+
+            turn_usage = {"input_tokens": turn_input_tokens, "output_tokens": turn_output_tokens} if (turn_input_tokens or turn_output_tokens) else None
+            session_input_tokens += turn_input_tokens
+            session_output_tokens += turn_output_tokens
 
             if action is None or coord is None:
                 parse_fail_turns += 1
@@ -171,6 +183,7 @@ def run_model_llm_dataset(
                         "status_after": board.status.value,
                         "error": "could not parse ACTION line after 2 attempts",
                         "failure_category": final_failure_category,
+                        "usage": turn_usage,
                     }
                 )
                 break
@@ -201,6 +214,7 @@ def run_model_llm_dataset(
                             "status_after": board.status.value,
                             "error": "invalid move: attempted to act on an already revealed/flagged cell",
                             "failure_category": "invalid_repeated_move",
+                            "usage": turn_usage,
                         }
                     )
                     break
@@ -218,6 +232,7 @@ def run_model_llm_dataset(
                         "status_after": board.status.value,
                         "error": None,
                         "failure_category": failure_category,
+                        "usage": turn_usage,
                     }
                 )
 
@@ -244,6 +259,7 @@ def run_model_llm_dataset(
                         "status_after": board.status.value,
                         "error": str(exc),
                         "failure_category": "spatial_reasoning_error",
+                        "usage": turn_usage,
                     }
                 )
                 break
@@ -282,6 +298,10 @@ def run_model_llm_dataset(
                 "parse_fail_turns": parse_fail_turns,
                 "echo_like_outputs": echo_like_outputs,
             },
+            "token_usage": {
+                "input_tokens": session_input_tokens,
+                "output_tokens": session_output_tokens,
+            } if (session_input_tokens or session_output_tokens) else None,
             "model": {
                 "provider": model_config.provider,
                 "id": model_config.model_id,

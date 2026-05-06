@@ -27,11 +27,17 @@ class ChatModelConfig:
     no_repeat_ngram_size: int = 4
 
 
+@dataclass(frozen=True, slots=True)
+class GenerateResult:
+    text: str
+    usage: dict | None  # {"input_tokens": int, "output_tokens": int} or None for backends that don't report it
+
+
 class ChatBackend(Protocol):
     provider_name: str
     model_id: str
 
-    def generate(self, messages: Sequence[ChatMessage]) -> str:
+    def generate(self, messages: Sequence[ChatMessage]) -> GenerateResult:
         raise NotImplementedError
 
 
@@ -106,7 +112,7 @@ class OllamaChatBackend:
         content = message.get("content", "")
         if not content.strip():
             raise RuntimeError(f"Ollama returned an empty message for model {self.model_id}")
-        return content.strip()
+        return GenerateResult(text=content.strip(), usage=None)
 
 
 class AnthropicChatBackend:
@@ -140,4 +146,10 @@ class AnthropicChatBackend:
         content = "".join(content_parts).strip()
         if not content:
             raise RuntimeError(f"Anthropic returned an empty message for model {self.model_id}")
-        return content
+        usage = None
+        if response.usage is not None:
+            usage = {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            }
+        return GenerateResult(text=content, usage=usage)
