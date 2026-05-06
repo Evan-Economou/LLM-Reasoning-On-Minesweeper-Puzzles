@@ -359,13 +359,17 @@ def _build_system_prompt(variant_code: str, variant_name: str, variant_descripti
         "Rules: Standard Minesweeper rules apply. You may only REVEAL or FLAG a single cell each turn.\n"
         f"Variant [{variant_code}] - {variant_name}: {variant_description}\n"
         "\n"
+        "CRITICAL CONSTRAINT: PICK ONLY HIDDEN CELLS ('#').\n"
+        "  Before outputting an action, check the exact target token on the current board.\n"
+        "  If the token is not '#', that move is invalid; choose a different coordinate.\n"
+        "  Never target '.', '1'-'8', or 'F'.\n"
+        "\n"
         "Board Format:\n"
         "  The board is represented as a list of cells in (row,col): token format, where:\n"
-        "  - Only choose actions on hidden cells marked '#' or '?'; never choose a cell that is already revealed ('.' or a number) or flagged ('F')\n"
-        "  - ? or # = hidden (unrevealed) cell - could be a mine or safe\n"
-        "  - . = revealed safe cell with 0 adjacent mines\n"
-        "  - 1-8 = revealed safe cell with that many adjacent mines\n"
-        "  - F = flagged mine cell\n"
+        "  - # = hidden (unrevealed) cell - THE ONLY TYPE YOU SHOULD SELECT\n"
+        "  - . = revealed safe cell with 0 adjacent mines - DO NOT SELECT\n"
+        "  - 1-8 = revealed safe cell with that many adjacent mines - DO NOT SELECT\n"
+        "  - F = flagged mine cell - DO NOT SELECT\n"
         "  - Rows are numbered 1-N from top to bottom\n"
         "  - Columns are numbered 1-N from left to right\n"
         "\n"
@@ -373,13 +377,13 @@ def _build_system_prompt(variant_code: str, variant_name: str, variant_descripti
         "  - A number (e.g., '2') means exactly that many adjacent hidden cells are mines unless the variant rule says otherwise\n"
         "  - A '.' (zero) means all adjacent cells are safe to reveal\n"
         "  - Hidden cells adjacent to many low numbers are safer than those near high numbers\n"
-        "  - Do not copy coordinates from the examples; choose the best hidden cell from the current board state\n"
+        "  - Do not copy coordinates from the examples; choose the best hidden (#) cell from the current board state\n"
         "\n"
         "Action Format:\n"
         "  - Action: Use REVEAL (row,col) or FLAG (row,col)\n"
         "  - Reasoning: A brief sentence or two explaining why you choose the move.\n"
         f"{reasoning_instruction}\n"
-        "Examples:\n"
+        "Examples (all selecting hidden # cells):\n"
         "```\n"
         "Action: REVEAL (1,3)\n"
         "Reasoning: Cell (1,3) is hidden (#) and adjacent to a '0', so all neighbors are safe.\n"
@@ -415,7 +419,7 @@ def _build_turn_prompt(system_prompt: str, board_text: str, turn: int, history: 
 
     pieces.append("Current board:")
     pieces.append(board_text)
-    pieces.append("Respond now. For this turn return exactly two lines: 'Action: REVEAL|FLAG <row,col>' then 'Reasoning: ...'")
+    pieces.append("Respond now. Return exactly two lines: 'Action: REVEAL|FLAG <row,col>' then 'Reasoning: ...'. Target must be '#'.")
     return "\n\n".join(pieces)
 
 
@@ -424,6 +428,8 @@ def _build_repair_prompt(previous_output: str) -> str:
         "Your last response could not be parsed as a move.\n"
         "Here was your last response:\n"
         f"{previous_output.strip()}\n\n"
+        "IMPORTANT: Choose ONLY a cell currently marked '#'.\n"
+        "If your chosen coordinate is not '#', pick another coordinate. Never select revealed cells or 'F'.\n\n"
         "Please return exactly two lines in this format:\n"
         "Action: REVEAL (row,col)\n"
         "Reasoning: <one short sentence>\n\n"
