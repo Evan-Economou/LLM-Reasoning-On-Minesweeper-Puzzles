@@ -22,18 +22,42 @@ def position_to_coord(position: Position) -> str:
 
 
 def coord_to_position(coord: str, size: int) -> Position:
+    """Convert coordinate string to Position. Supports both 'A1' (letter+number) and '1,1' or '1 1' (numeric) formats."""
     stripped = coord.strip().upper()
     if len(stripped) < 2:
         raise ValueError(f"invalid coordinate: {coord}")
+    
+    # Try numeric format first: "1,1" or "1 1" or "(1,1)"
+    if any(c in stripped for c in ",() "):
+        # Remove parentheses
+        numeric_str = stripped.replace("(", "").replace(")", "").strip()
+        # Split by comma or space
+        if "," in numeric_str:
+            parts = numeric_str.split(",")
+        else:
+            parts = numeric_str.split()
+        
+        if len(parts) == 2:
+            try:
+                row = int(parts[0].strip()) - 1
+                col = int(parts[1].strip()) - 1
+                if not (0 <= row < size and 0 <= col < size):
+                    raise ValueError(f"coordinate out of bounds: {coord}")
+                return Position(row=row, col=col)
+            except (ValueError, IndexError):
+                pass  # Fall through to letter+number format
+    
+    # Fall back to letter+number format: "A1", "B2", etc.
     col_char = stripped[0]
     row_part = stripped[1:]
-    if not col_char.isalpha() or not row_part.isdigit():
-        raise ValueError(f"invalid coordinate: {coord}")
-    col = ord(col_char) - ord("A")
-    row = int(row_part) - 1
-    if not (0 <= row < size and 0 <= col < size):
-        raise ValueError(f"coordinate out of bounds: {coord}")
-    return Position(row=row, col=col)
+    if col_char.isalpha() and row_part.isdigit():
+        col = ord(col_char) - ord("A")
+        row = int(row_part) - 1
+        if not (0 <= row < size and 0 <= col < size):
+            raise ValueError(f"coordinate out of bounds: {coord}")
+        return Position(row=row, col=col)
+    
+    raise ValueError(f"invalid coordinate: {coord}")
 
 
 @dataclass(frozen=True, slots=True)

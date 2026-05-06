@@ -19,8 +19,8 @@ class ChatModelConfig:
     model_id: str = "llama3.2:3b"
     base_url: str = ""
     api_key: str | None = None
-    timeout_seconds: float = 120.0
-    max_new_tokens: int = 32
+    timeout_seconds: float = 300.0
+    max_new_tokens: int = 64
     temperature: float = 0.0
     top_p: float = 1.0
     repetition_penalty: float = 1.12
@@ -39,8 +39,6 @@ def create_chat_backend(config: ChatModelConfig) -> ChatBackend:
     provider = config.provider.strip().lower()
     if provider == "ollama":
         return OllamaChatBackend(config)
-    if provider == "openai":
-        return OpenAIChatBackend(config)
     if provider == "anthropic":
         return AnthropicChatBackend(config)
     raise ValueError(f"Unsupported model provider: {config.provider!r}")

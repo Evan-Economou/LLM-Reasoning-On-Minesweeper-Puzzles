@@ -16,12 +16,16 @@ from .model_backends import ChatMessage, ChatModelConfig, create_chat_backend
 
 _ACTION_LINE_RE = re.compile(r"^\s*(?:ACTION|Action)\s*:\s*(REVEAL|FLAG)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
 _BARE_ACTION_LINE_RE = re.compile(r"^\s*(REVEAL|FLAG|Reveal|Flag)\s+([A-Za-z]\d+)\s*[.!]?\s*$", re.IGNORECASE)
+# Numeric coordinate patterns: "(1,1)", "(1, 1)", "1,1", "1 1"
+_ACTION_NUMERIC_RE = re.compile(r"^\s*(?:ACTION|Action)\s*:\s*(REVEAL|FLAG)\s+[\(]?\s*(\d+)\s*,?\s*(\d+)\s*[\)]?\s*[.!]?\s*$", re.IGNORECASE)
+_BARE_ACTION_NUMERIC_RE = re.compile(r"^\s*(REVEAL|FLAG|Reveal|Flag)\s+[\(]?\s*(\d+)\s*,?\s*(\d+)\s*[\)]?\s*[.!]?\s*$", re.IGNORECASE)
 _PROMPT_ECHO_RE = re.compile(
     r"(your previous output could not be parsed|output format\s*:|action\s*:\s*\[reveal\|flag\]|respond now\.)",
     re.IGNORECASE,
 )
 # More tolerant action parsing: allows variations like "REVEAL A1", "ACTION: REVEAL A1", "A1 REVEAL"
 _FLEXIBLE_ACTION_RE = re.compile(r"(REVEAL|FLAG|Reveal|Flag)\s+([A-Za-z]\d+)", re.IGNORECASE)
+_FLEXIBLE_NUMERIC_ACTION_RE = re.compile(r"(REVEAL|FLAG|Reveal|Flag)\s+[\(]?\s*(\d+)\s*,?\s*(\d+)\s*[\)]?", re.IGNORECASE)
 _REASONING_LINE_RE = re.compile(r"^\s*REASONING\s*:\s*(.*)$", re.IGNORECASE)
 
 
@@ -46,7 +50,7 @@ def run_model_llm_dataset(
     session_log_path: str,
     model_config: ModelEvalConfig,
     player_id: str = "model",
-    style: str = "coordinates",
+    style: str = "numeric",
     start_index: int = 0,
     limit: int | None = None,
     max_turn_multiplier: int = 3,
@@ -347,25 +351,46 @@ def run_local_llm_dataset(
 
 def _build_system_prompt(variant_code: str, variant_name: str, variant_description: str, include_cot: bool) -> str:
     reasoning_instruction = (
-        "For each move, provide reasoning and then the action.\nFormat exactly as:\nReasoning: <brief reasoning>\nAction: [REVEAL|FLAG] <col><row>"
+        "For each move, provide the action first and then the reasoning.\nFormat exactly as:\nAction: REVEAL (row,col)\nReasoning: <brief reasoning>"
         if include_cot
-        else "Do NOT include in-depth chain-of-thought. Provide a concise one-line Reasoning and the Action lines as shown."
+        else "Do NOT include in-depth chain-of-thought. Provide a concise Action line followed by a concise Reasoning line."
     )
     return (
         "Rules: Standard Minesweeper rules apply. You may only REVEAL or FLAG a single cell each turn.\n"
         f"Variant [{variant_code}] - {variant_name}: {variant_description}\n"
-        "Action Types:\n"
+        "\n"
+        "Board Format:\n"
+        "  The board is represented as a list of cells in (row,col): token format, where:\n"
+        "  - Only choose actions on hidden cells marked '#' or '?'; never choose a cell that is already revealed ('.' or a number) or flagged ('F')\n"
+        "  - ? or # = hidden (unrevealed) cell - could be a mine or safe\n"
+        "  - . = revealed safe cell with 0 adjacent mines\n"
+        "  - 1-8 = revealed safe cell with that many adjacent mines\n"
+        "  - F = flagged mine cell\n"
+        "  - Rows are numbered 1-N from top to bottom\n"
+        "  - Columns are numbered 1-N from left to right\n"
+        "\n"
+        "Key Logic:\n"
+        "  - A number (e.g., '2') means exactly that many adjacent hidden cells are mines unless the variant rule says otherwise\n"
+        "  - A '.' (zero) means all adjacent cells are safe to reveal\n"
+        "  - Hidden cells adjacent to many low numbers are safer than those near high numbers\n"
+        "  - Do not copy coordinates from the examples; choose the best hidden cell from the current board state\n"
+        "\n"
+        "Action Format:\n"
+        "  - Action: Use REVEAL (row,col) or FLAG (row,col)\n"
         "  - Reasoning: A brief sentence or two explaining why you choose the move.\n"
-        "  - Action: Use one of ACTION: REVEAL <col><row> or ACTION: FLAG <col><row> (columns are letters, rows are numbers).\n"
         f"{reasoning_instruction}\n"
         "Examples:\n"
         "```\n"
-        "Reasoning: The only safe cell adjacent to a '1' is A1, so reveal it.\n"
-        "Action: ACTION: REVEAL A1\n"
+        "Action: REVEAL (1,3)\n"
+        "Reasoning: Cell (1,3) is hidden (#) and adjacent to a '0', so all neighbors are safe.\n"
         "```\n"
         "```\n"
-        "Reasoning: This cell must be a mine because all others around the clue are accounted for.\n"
-        "Action: ACTION: FLAG C3\n"
+        "Action: REVEAL (4,4)\n"
+        "Reasoning: Cell (4,4) is hidden (#) and is the only unaccounted adjacent cell to a '1'.\n"
+        "```\n"
+        "```\n"
+        "Action: FLAG (5,1)\n"
+        "Reasoning: Cell (5,1) is hidden (#), and all other neighbors of the '2' at (5,2) are already accounted for.\n"
         "```\n"
     )
 
@@ -390,7 +415,7 @@ def _build_turn_prompt(system_prompt: str, board_text: str, turn: int, history: 
 
     pieces.append("Current board:")
     pieces.append(board_text)
-    pieces.append("Respond now. For this turn return exactly two lines: 'Reasoning: ...' then 'Action: ACTION: REVEAL|FLAG <col><row>'")
+    pieces.append("Respond now. For this turn return exactly two lines: 'Action: REVEAL|FLAG <row,col>' then 'Reasoning: ...'")
     return "\n\n".join(pieces)
 
 
@@ -400,8 +425,8 @@ def _build_repair_prompt(previous_output: str) -> str:
         "Here was your last response:\n"
         f"{previous_output.strip()}\n\n"
         "Please return exactly two lines in this format:\n"
-        "Reasoning: <one short sentence>\n"
-        "Action: ACTION: [REVEAL|FLAG] [col][row]\n\n"
+        "Action: REVEAL (row,col)\n"
+        "Reasoning: <one short sentence>\n\n"
         "Do not include extra text or code blocks.\n\n"
         "Now output the two lines as described."
     )
@@ -409,7 +434,7 @@ def _build_repair_prompt(previous_output: str) -> str:
 
 def _parse_action(text: str) -> tuple[str, str, str] | None:
     # Parse only full standalone lines (prefer the final lines). Expect two lines:
-    # Reasoning: ...\nAction: ACTION: REVEAL A1
+    # Action: REVEAL (1,1)\nReasoning: ...
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         return None
@@ -419,13 +444,26 @@ def _parse_action(text: str) -> tuple[str, str, str] | None:
     action_match = None
     for i in range(len(lines) - 1, -1, -1):
         line = lines[i]
+        # Try letter-based first
         if _ACTION_LINE_RE.match(line) or _BARE_ACTION_LINE_RE.match(line):
             action_idx = i
             action_match = lines[i]
             break
+        # Then try numeric-based
+        if _ACTION_NUMERIC_RE.match(line) or _BARE_ACTION_NUMERIC_RE.match(line):
+            action_idx = i
+            action_match = lines[i]
+            break
         if not _PROMPT_ECHO_RE.search(line):
+            # Try letter-based flexible
             flexible = _FLEXIBLE_ACTION_RE.search(line)
             if flexible:
+                action_idx = i
+                action_match = lines[i]
+                break
+            # Try numeric-based flexible
+            flexible_numeric = _FLEXIBLE_NUMERIC_ACTION_RE.search(line)
+            if flexible_numeric:
                 action_idx = i
                 action_match = lines[i]
                 break
@@ -434,6 +472,7 @@ def _parse_action(text: str) -> tuple[str, str, str] | None:
         return None
 
     # Parse action and coord from the matched line
+    # Try letter-based patterns first
     m = _ACTION_LINE_RE.match(action_match)
     if m:
         act, coord = m.group(1).upper(), m.group(2).upper()
@@ -446,11 +485,27 @@ def _parse_action(text: str) -> tuple[str, str, str] | None:
             if flex:
                 act, coord = flex.group(1).upper(), flex.group(2).upper()
             else:
-                return None
+                # Try numeric patterns
+                m3 = _ACTION_NUMERIC_RE.match(action_match)
+                if m3:
+                    act, row, col = m3.group(1).upper(), m3.group(2), m3.group(3)
+                    coord = f"{row},{col}"
+                else:
+                    m4 = _BARE_ACTION_NUMERIC_RE.match(action_match)
+                    if m4:
+                        act, row, col = m4.group(1).upper(), m4.group(2), m4.group(3)
+                        coord = f"{row},{col}"
+                    else:
+                        flex_numeric = _FLEXIBLE_NUMERIC_ACTION_RE.search(action_match)
+                        if flex_numeric:
+                            act, row, col = flex_numeric.group(1).upper(), flex_numeric.group(2), flex_numeric.group(3)
+                            coord = f"{row},{col}"
+                        else:
+                            return None
 
-    # Extract reasoning: look for a preceding line starting with 'Reasoning:'
+    # Extract reasoning: look for any line starting with 'Reasoning:'
     reasoning = ""
-    for j in range(action_idx - 1, -1, -1):
+    for j in range(len(lines) - 1, -1, -1):
         rl = lines[j]
         rr = _REASONING_LINE_RE.match(rl)
         if rr:

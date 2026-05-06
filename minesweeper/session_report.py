@@ -146,7 +146,7 @@ def _build_board_progression(session: dict, puzzle_record: object) -> list[dict[
     progression: list[dict[str, object]] = [
         {
             "label": "Initial board",
-            "board_text": _BOARD_ENCODER.render(board, variant=variant, style="coordinates"),
+        "board_text": _BOARD_ENCODER.render(board, variant=variant, style="numeric_coordinates"),
       "board_grid": _board_grid_payload(board, variant),
             "move": None,
         }
@@ -169,7 +169,7 @@ def _build_board_progression(session: dict, puzzle_record: object) -> list[dict[
         progression.append(
             {
                 "label": f"Turn {turn}" if turn is not None else "Turn ?",
-                "board_text": _BOARD_ENCODER.render(board, variant=variant, style="coordinates"),
+            "board_text": _BOARD_ENCODER.render(board, variant=variant, style="numeric_coordinates"),
             "board_grid": _board_grid_payload(board, variant),
                 "move": {
                     "turn": turn,
@@ -207,7 +207,7 @@ def _board_grid_payload(board: object, variant: object) -> dict[str, object]:
         {
           "row": row,
           "col": col,
-          "coord": f"{chr(ord('A') + col)}{row + 1}",
+          "coord": f"{row + 1},{col + 1}",
           "token": token,
         }
       )
@@ -807,7 +807,7 @@ def _render_dashboard_html(
         return padded.map((token, colIndex) => ({
           row: rowIndex,
           col: colIndex,
-          coord: `${String.fromCharCode(65 + colIndex)}${rowIndex + 1}`,
+          coord: `${rowIndex + 1},${colIndex + 1}`,
           token,
         }));
       });
@@ -829,20 +829,19 @@ def _render_dashboard_html(
         return `<pre class="board-text">${escapeHtml(boardText || '(unavailable)')}</pre>`;
       }
 
-      const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
       let htmlOut = `<div class="board-figure"><div class="ms-board" style="--size:${size}">`;
       htmlOut += `<div class="corner"></div>`;
       for (let col = 0; col < size; col += 1) {
-        htmlOut += `<div class="axis">${escapeHtml(alpha[col] || String(col + 1))}</div>`;
+        htmlOut += `<div class="axis">${col + 1}</div>`;
       }
 
       for (let row = 0; row < grid.rows.length; row += 1) {
         htmlOut += `<div class="axis">${row + 1}</div>`;
         const cells = grid.rows[row] || [];
         for (let col = 0; col < size; col += 1) {
-          const cell = cells[col] || { token: '#', coord: `${alpha[col] || col + 1}${row + 1}` };
+          const cell = cells[col] || { token: '#', coord: `${row + 1},${col + 1}` };
           const token = String(cell.token || '#');
-          const coord = String(cell.coord || `${alpha[col] || col + 1}${row + 1}`);
+          const coord = String(cell.coord || `${row + 1},${col + 1}`);
 
           let cls = 'tile tile-hidden';
           let glyph = '';

@@ -19,6 +19,10 @@ class TextBoardEncoder:
         variant_code = variant.code
         if style == "coordinates":
             return self._render_coordinate_grid(board, variant, variant_name, variant_code, show_solution)
+        if style == "numeric_coordinates":
+            return self._render_numeric_coordinate_grid(board, variant, variant_name, variant_code, show_solution)
+        if style == "numeric":
+            return self._render_numeric_list(board, variant, variant_name, variant_code, show_solution)
         if style == "flat":
             return self._render_flat_grid(board, variant, variant_name, variant_code, show_solution)
         if style == "narrative":
@@ -52,6 +56,55 @@ class TextBoardEncoder:
         ])
         if show_solution:
             lines[-1] += ", M = hidden mine"
+        return "\n".join(lines)
+
+    def _render_numeric_coordinate_grid(
+        self,
+        board: MinesweeperBoard,
+        variant: VariantRule,
+        variant_name: str,
+        variant_code: str,
+        show_solution: bool,
+    ) -> str:
+        lines = [
+            f"Board ({board.size}x{board.size}) - Variant: {variant_name} [{variant_code}]",
+            f"Mine count: {board.mine_count}",
+            "",
+            "   " + "  ".join(str(index + 1) for index in range(board.size)),
+        ]
+        for row_index in range(board.size):
+            tokens = [
+                self._visible_token(board, variant, row_index, col_index, show_solution=show_solution)
+                for col_index in range(board.size)
+            ]
+            lines.append(f"{row_index + 1}  " + "  ".join(tokens))
+        lines.extend([
+            "",
+            "Legend: # = hidden, . = revealed safe, F = flagged mine",
+        ])
+        if show_solution:
+            lines[-1] += ", M = hidden mine"
+        return "\n".join(lines)
+
+    def _render_numeric_list(
+        self,
+        board: MinesweeperBoard,
+        variant: VariantRule,
+        variant_name: str,
+        variant_code: str,
+        show_solution: bool,
+    ) -> str:
+        """Render board as numeric list in (row,col): token format (as per arxiv 2311.07387)."""
+        lines = [
+            f"Board ({board.size}x{board.size}) - Variant: {variant_name} [{variant_code}]",
+            f"Mine count: {board.mine_count}",
+            "",
+        ]
+        for row_index in range(board.size):
+            for col_index in range(board.size):
+                token = self._visible_token(board, variant, row_index, col_index, show_solution=show_solution)
+                # Note: 1-indexed output to match arxiv format
+                lines.append(f"({row_index + 1},{col_index + 1}): {token}")
         return "\n".join(lines)
 
     def _render_flat_grid(
