@@ -15,31 +15,27 @@ class TextBoardEncoder:
         style: str = "coordinates",
         show_solution: bool = False,
     ) -> str:
-        variant_name = variant.name
-        variant_code = variant.code
         if style == "coordinates":
-            return self._render_coordinate_grid(board, variant, variant_name, variant_code, show_solution)
+            return self._render_coordinate_grid(board, variant, show_solution)
         if style == "numeric_coordinates":
-            return self._render_numeric_coordinate_grid(board, variant, variant_name, variant_code, show_solution)
+            return self._render_numeric_coordinate_grid(board, variant, show_solution)
         if style == "numeric":
-            return self._render_numeric_list(board, variant, variant_name, variant_code, show_solution)
+            return self._render_numeric_list(board, variant, show_solution)
         if style == "flat":
-            return self._render_flat_grid(board, variant, variant_name, variant_code, show_solution)
+            return self._render_flat_grid(board, variant, show_solution)
         if style == "narrative":
-            return self._render_narrative(board, variant, variant_name, variant_code, show_solution)
+            return self._render_narrative(board, variant, show_solution)
         raise ValueError(f"unknown board text style: {style}")
 
     def _render_coordinate_grid(
         self,
         board: MinesweeperBoard,
         variant: VariantRule,
-        variant_name: str,
-        variant_code: str,
         show_solution: bool,
     ) -> str:
         column_labels = [chr(ord("A") + index) for index in range(board.size)]
         lines = [
-            f"Board ({board.size}x{board.size}) - Variant: {variant_name} [{variant_code}]",
+            f"Board ({board.size}x{board.size}) - Variant: {variant.name} [{variant.code}]",
             f"Mine count: {board.mine_count}",
             "",
             "   " + "  ".join(column_labels),
@@ -62,12 +58,10 @@ class TextBoardEncoder:
         self,
         board: MinesweeperBoard,
         variant: VariantRule,
-        variant_name: str,
-        variant_code: str,
         show_solution: bool,
     ) -> str:
         lines = [
-            f"Board ({board.size}x{board.size}) - Variant: {variant_name} [{variant_code}]",
+            f"Board ({board.size}x{board.size}) - Variant: {variant.name} [{variant.code}]",
             f"Mine count: {board.mine_count}",
             "",
             "   " + "  ".join(str(index + 1) for index in range(board.size)),
@@ -90,13 +84,10 @@ class TextBoardEncoder:
         self,
         board: MinesweeperBoard,
         variant: VariantRule,
-        variant_name: str,
-        variant_code: str,
         show_solution: bool,
     ) -> str:
-        """Render board as numeric list in (row,col): token format (as per arxiv 2311.07387)."""
         lines = [
-            f"Board ({board.size}x{board.size}) - Variant: {variant_name} [{variant_code}]",
+            f"Board ({board.size}x{board.size}) - Variant: {variant.name} [{variant.code}]",
             f"Mine count: {board.mine_count}",
             "",
         ]
@@ -111,11 +102,9 @@ class TextBoardEncoder:
         self,
         board: MinesweeperBoard,
         variant: VariantRule,
-        variant_name: str,
-        variant_code: str,
         show_solution: bool,
     ) -> str:
-        lines = [f"Board ({board.size}x{board.size}) - Variant: {variant_name} [{variant_code}]", f"Mine count: {board.mine_count}", ""]
+        lines = [f"Board ({board.size}x{board.size}) - Variant: {variant.name} [{variant.code}]", f"Mine count: {board.mine_count}", ""]
         flat_tokens = []
         for position in board.positions():
             index = position.row * board.size + position.col
@@ -129,11 +118,9 @@ class TextBoardEncoder:
         self,
         board: MinesweeperBoard,
         variant: VariantRule,
-        variant_name: str,
-        variant_code: str,
         show_solution: bool,
     ) -> str:
-        lines = [f"Board ({board.size}x{board.size}) - Variant: {variant_name} [{variant_code}]", f"Mine count: {board.mine_count}", ""]
+        lines = [f"Board ({board.size}x{board.size}) - Variant: {variant.name} [{variant.code}]", f"Mine count: {board.mine_count}", ""]
         for row_index in range(board.size):
             row_tokens = [
                 self._visible_token(board, variant, row_index, col_index, show_solution=show_solution)

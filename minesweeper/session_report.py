@@ -7,14 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 if __package__ in (None, ""):
-  project_root = Path(__file__).resolve().parents[1]
-  if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-  from minesweeper.dataset import board_from_record, coord_to_position, read_puzzle_dataset
-  from minesweeper.text import TextBoardEncoder
+    project_root = Path(__file__).resolve().parents[1]
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from minesweeper.dataset import board_from_record, coord_to_position, read_puzzle_dataset
+    from minesweeper.text import TextBoardEncoder
 else:
-  from .dataset import board_from_record, coord_to_position, read_puzzle_dataset
-  from .text import TextBoardEncoder
+    from .dataset import board_from_record, coord_to_position, read_puzzle_dataset
+    from .text import TextBoardEncoder
 
 _BOARD_ENCODER = TextBoardEncoder()
 
@@ -62,15 +62,15 @@ def build_session_dashboard(
 def _read_jsonl_sessions(input_path: str) -> list[dict]:
     path = Path(input_path)
     if not path.exists():
-      # Try resolving relative to the project root (package parent). If still missing,
-      # warn and skip this input rather than raising so dashboards can be built
-      # from a subset of provided files.
-      alt = Path(__file__).resolve().parents[1] / input_path
-      if alt.exists():
-        path = alt
-      else:
-        print(f"Warning: session log not found: {input_path}", file=sys.stderr)
-        return []
+        # Try resolving relative to the project root (package parent). If still missing,
+        # warn and skip this input rather than raising so dashboards can be built
+        # from a subset of provided files.
+        alt = Path(__file__).resolve().parents[1] / input_path
+        if alt.exists():
+            path = alt
+        else:
+            print(f"Warning: session log not found: {input_path}", file=sys.stderr)
+            return []
 
     sessions: list[dict] = []
     with path.open("r", encoding="utf-8") as handle:
@@ -146,8 +146,8 @@ def _build_board_progression(session: dict, puzzle_record: object) -> list[dict[
     progression: list[dict[str, object]] = [
         {
             "label": "Initial board",
-        "board_text": _BOARD_ENCODER.render(board, variant=variant, style="numeric_coordinates"),
-      "board_grid": _board_grid_payload(board, variant),
+            "board_text": _BOARD_ENCODER.render(board, variant=variant, style="numeric_coordinates"),
+            "board_grid": _board_grid_payload(board, variant),
             "move": None,
         }
     ]
@@ -169,13 +169,13 @@ def _build_board_progression(session: dict, puzzle_record: object) -> list[dict[
         progression.append(
             {
                 "label": f"Turn {turn}" if turn is not None else "Turn ?",
-            "board_text": _BOARD_ENCODER.render(board, variant=variant, style="numeric_coordinates"),
-            "board_grid": _board_grid_payload(board, variant),
+                "board_text": _BOARD_ENCODER.render(board, variant=variant, style="numeric_coordinates"),
+                "board_grid": _board_grid_payload(board, variant),
                 "move": {
                     "turn": turn,
                     "action": action or "-",
                     "coordinate": coordinate or "-",
-                  "reasoning": move.get("reasoning") or "-",
+                    "reasoning": move.get("reasoning") or "-",
                     "status_after": move.get("status_after") or "-",
                     "changed": bool(move.get("changed")),
                     "hit_mine": bool(move.get("hit_mine")),
@@ -187,36 +187,36 @@ def _build_board_progression(session: dict, puzzle_record: object) -> list[dict[
 
 
 def _board_grid_payload(board: object, variant: object) -> dict[str, object]:
-  rows: list[list[dict[str, object]]] = []
-  for row in range(board.size):
-    current_row: list[dict[str, object]] = []
-    for col in range(board.size):
-      cell = board.cell(row, col)
-      if cell.revealed:
-        if cell.mine:
-          token = "*"
-        else:
-          clue = int(variant.clue_value(board, row, col))
-          token = "." if clue == 0 else str(clue)
-      elif cell.flagged:
-        token = "F"
-      else:
-        token = "#"
+    rows: list[list[dict[str, object]]] = []
+    for row in range(board.size):
+        current_row: list[dict[str, object]] = []
+        for col in range(board.size):
+            cell = board.cell(row, col)
+            if cell.revealed:
+                if cell.mine:
+                    token = "*"
+                else:
+                    clue = int(variant.clue_value(board, row, col))
+                    token = "." if clue == 0 else str(clue)
+            elif cell.flagged:
+                token = "F"
+            else:
+                token = "#"
 
-      current_row.append(
-        {
-          "row": row,
-          "col": col,
-          "coord": f"{row + 1},{col + 1}",
-          "token": token,
-        }
-      )
-    rows.append(current_row)
+            current_row.append(
+                {
+                    "row": row,
+                    "col": col,
+                    "coord": f"{row + 1},{col + 1}",
+                    "token": token,
+                }
+            )
+        rows.append(current_row)
 
-  return {
-    "size": board.size,
-    "rows": rows,
-  }
+    return {
+        "size": board.size,
+        "rows": rows,
+    }
 
 
 def _safe_float(value: object) -> float:

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from hashlib import sha1
 from time import monotonic
 
 from .board import GameStatus, MinesweeperBoard
-from .dataset import SessionMove, SessionRecord, append_session_record, coord_to_position
+from .dataset import SessionMove, SessionRecord, _now_iso, _session_id, append_session_record, coord_to_position
 from .text import TextBoardEncoder
 from .variants import VariantRule
 
@@ -15,15 +13,6 @@ from .variants import VariantRule
 class PlayConfig:
     player_id: str
     session_log_path: str
-
-
-def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat()
-
-
-def _session_id(player_id: str, puzzle_id: str) -> str:
-    payload = f"{player_id}|{puzzle_id}|{_now_iso()}"
-    return sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def run_interactive_session(

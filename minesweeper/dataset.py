@@ -17,6 +17,11 @@ def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _session_id(player_id: str, puzzle_id: str) -> str:
+    payload = f"{player_id}|{puzzle_id}|{_now_iso()}"
+    return sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def position_to_coord(position: Position) -> str:
     return f"{chr(ord('A') + position.col)}{position.row + 1}"
 

@@ -67,7 +67,7 @@ class SolutionEnumerator:
             for col in range(observation.size)
         }
         hidden_unflagged = sorted(
-            all_positions - set(observation.revealed_safe) - set(observation.flagged),
+            all_positions - observation.revealed_safe - observation.flagged,
             key=lambda pos: (pos.row, pos.col),
         )
         remaining_mines = observation.mine_count - len(observation.flagged)
@@ -128,10 +128,11 @@ class LogicSolver:
             if not solutions:
                 return False
 
+            flagged = set(board.flagged_positions())
             hidden_cells = [
                 position
                 for position in board.hidden_positions()
-                if position not in board.flagged_positions()
+                if position not in flagged
             ]
             if not hidden_cells:
                 return board.is_won()
