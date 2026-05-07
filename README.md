@@ -196,3 +196,11 @@ This coalesces all of the listed session reports and builds an html dashboard to
     --output docs/session_dashboard.html
    
   ---
+
+  Step 5: Data Analysis
+
+  uv run python data_processing/visualize.py docs/haiku_cot_sessions.jsonl -o docs/figures/
+  # or interactively:
+  uv run python data_processing/visualize.py docs/haiku_cot_sessions.jsonl
+  # or just one plot:
+  uv run python data_processing/visualize.py docs/haiku_cot_sessions.jsonl --only win_rate failure_analysis
