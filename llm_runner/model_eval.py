@@ -45,6 +45,27 @@ class ModelEvalSummary:
     aborted: int
 
 
+def _load_completed_by_variant(resume_from: str) -> dict[str, set[str]]:
+    completed: dict[str, set[str]] = {}
+    path = Path(resume_from)
+    if not path.exists():
+        return completed
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                session = json.loads(line)
+                pid = session.get("puzzle_id")
+                vc = session.get("variant_code")
+                if pid and vc:
+                    completed.setdefault(vc, set()).add(pid)
+            except json.JSONDecodeError:
+                pass
+    return completed
+
+
 def run_model_llm_dataset(
     dataset_path: str,
     session_log_path: str,
@@ -56,10 +77,17 @@ def run_model_llm_dataset(
     max_turn_multiplier: int = 3,
     include_cot: bool = True,
     reminder_each_turn: bool = False,
+    resume_from: str | None = None,
 ) -> ModelEvalSummary:
     records = read_puzzle_dataset(dataset_path)
     if not records:
         raise RuntimeError("dataset is empty")
+
+    # For Anthropic + CoT, use extended thinking instead of in-text CoT instructions.
+    use_extended_thinking = include_cot and model_config.provider.lower() == "anthropic"
+    if use_extended_thinking and not model_config.extended_thinking:
+        from dataclasses import replace
+        model_config = replace(model_config, extended_thinking=True)
 
     model = create_chat_backend(model_config)
     encoder = TextBoardEncoder()
@@ -69,21 +97,38 @@ def run_model_llm_dataset(
     lost = 0
     aborted = 0
 
+    # Load already-completed puzzle IDs per variant from a prior session log.
+    completed_by_variant = _load_completed_by_variant(resume_from) if resume_from else {}
+
     # Group records by variant, preserving dataset order within each group.
     variant_groups: dict[str, list] = {}
     for record in records:
         variant_groups.setdefault(record.variant_code, []).append(record)
 
-    # Select up to `limit` records per variant starting at `start_index`.
+    # Select up to `limit` records per variant starting at `start_index`,
+    # skipping any puzzle IDs that already appear in the resume file.
     begin = max(start_index, 0)
     selected_records = []
-    for group in variant_groups.values():
-        end_idx = len(group) if limit is None else min(len(group), begin + limit)
-        selected_records.extend(group[begin:end_idx])
+    skipped_summary: list[str] = []
+    for variant_code, group in variant_groups.items():
+        completed = completed_by_variant.get(variant_code, set())
+        done_count = len(completed)
+        if limit is not None and done_count >= limit:
+            skipped_summary.append(f"  {variant_code}: skipped entirely ({done_count}/{limit} already done)")
+            continue
+        remaining_limit = None if limit is None else limit - done_count
+        candidates = [r for r in group[begin:] if r.puzzle_id not in completed]
+        if remaining_limit is not None:
+            candidates = candidates[:remaining_limit]
+        if done_count and candidates:
+            skipped_summary.append(f"  {variant_code}: resuming after {done_count} completed, running {len(candidates)} more")
+        selected_records.extend(candidates)
 
     total_selected = len(selected_records)
     per_variant_desc = f"puzzles {begin + 1}–{begin + limit}" if limit is not None else f"all puzzles from index {begin}"
 
+    resume_line = f"  Resume file: {resume_from}\n" if resume_from else ""
+    skipped_lines = ("\n".join(skipped_summary) + "\n") if skipped_summary else ""
     print(
         f"{'='*70}\n"
         f"Starting LLM puzzle evaluation:\n"
@@ -93,6 +138,8 @@ def run_model_llm_dataset(
         f"  Dataset: {dataset_path} ({len(records)} puzzles total)\n"
         f"  Processing: {per_variant_desc} of each variant ({total_selected} puzzles total)\n"
         f"  Player ID: {player_id}\n"
+        f"{resume_line}"
+        f"{skipped_lines}"
         f"{'='*70}\n"
     )
 
@@ -105,7 +152,7 @@ def run_model_llm_dataset(
         baseline_moves, _ = solve_with_trace(baseline_board, variant)
         turn_limit = max(1, max_turn_multiplier * max(1, len(baseline_moves)))
 
-        system_prompt = _build_system_prompt(variant.code, variant.name, variant.description, include_cot)
+        system_prompt = _build_system_prompt(variant.code, variant.name, variant.description, include_cot, use_extended_thinking)
         moves: list[dict] = []
         final_failure_category: str | None = None
         parse_fail_turns = 0
@@ -131,6 +178,7 @@ def run_model_llm_dataset(
             coord = None
             parsed_reasoning: str | None = None
             model_output = ""
+            thinking_output: str | None = None
             attempt_prompt = prompt
             turn_input_tokens = 0
             turn_output_tokens = 0
@@ -141,6 +189,7 @@ def run_model_llm_dataset(
                 ]
                 result = model.generate(attempt_messages)
                 model_output = result.text
+                thinking_output = result.thinking
                 if result.usage:
                     turn_input_tokens += result.usage.get("input_tokens", 0)
                     turn_output_tokens += result.usage.get("output_tokens", 0)
@@ -175,6 +224,7 @@ def run_model_llm_dataset(
                         "turn": turn,
                         "prompt": prompt,
                         "model_output": model_output,
+                        "thinking": thinking_output,
                         "action": None,
                         "coordinate": None,
                         "reasoning": parsed_reasoning,
@@ -206,6 +256,7 @@ def run_model_llm_dataset(
                             "turn": turn,
                             "prompt": prompt,
                             "model_output": model_output,
+                            "thinking": thinking_output,
                             "action": action,
                             "coordinate": coord,
                             "reasoning": parsed_reasoning,
@@ -224,6 +275,7 @@ def run_model_llm_dataset(
                         "turn": turn,
                         "prompt": prompt,
                         "model_output": model_output,
+                        "thinking": thinking_output,
                         "action": action,
                         "coordinate": coord,
                         "reasoning": parsed_reasoning,
@@ -251,6 +303,7 @@ def run_model_llm_dataset(
                         "turn": turn,
                         "prompt": prompt,
                         "model_output": model_output,
+                        "thinking": thinking_output,
                         "action": action,
                         "coordinate": coord,
                         "reasoning": parsed_reasoning,
@@ -314,6 +367,7 @@ def run_model_llm_dataset(
             },
             "prompting": {
                 "include_cot": include_cot,
+                "extended_thinking": use_extended_thinking,
                 "reminder_each_turn": reminder_each_turn,
             },
             "moves": moves,
@@ -343,7 +397,7 @@ def run_model_llm_dataset(
         session_log_path=session_log_path,
         provider=model_config.provider,
         model_id=model_config.model_id,
-        evaluated=max(0, end - begin),
+        evaluated=total_selected,
         won=won,
         lost=lost,
         aborted=aborted,
@@ -364,6 +418,7 @@ def run_local_llm_dataset(
     max_turn_multiplier: int = 3,
     include_cot: bool = True,
     reminder_each_turn: bool = False,
+    resume_from: str | None = None,
 ) -> ModelEvalSummary:
     # Backward-compatible alias for older imports.
     return run_model_llm_dataset(
@@ -377,15 +432,17 @@ def run_local_llm_dataset(
         max_turn_multiplier=max_turn_multiplier,
         include_cot=include_cot,
         reminder_each_turn=reminder_each_turn,
+        resume_from=resume_from,
     )
 
 
-def _build_system_prompt(variant_code: str, variant_name: str, variant_description: str, include_cot: bool) -> str:
-    reasoning_instruction = (
-        "For each move, provide the action first and then the reasoning.\nFormat exactly as:\nAction: REVEAL (row,col)\nReasoning: <brief reasoning>"
-        if include_cot
-        else "Do NOT include in-depth chain-of-thought. Provide a concise Action line followed by a concise Reasoning line."
-    )
+def _build_system_prompt(variant_code: str, variant_name: str, variant_description: str, include_cot: bool, extended_thinking: bool = False) -> str:
+    if extended_thinking or not include_cot:
+        # Extended thinking: the model reasons natively in its thinking block;
+        # the visible output should just be concise action + reasoning lines.
+        reasoning_instruction = "Do NOT include in-depth chain-of-thought. Provide a concise Action line followed by a concise Reasoning line."
+    else:
+        reasoning_instruction = "For each move, provide the action first and then the reasoning.\nFormat exactly as:\nAction: REVEAL (row,col)\nReasoning: <brief reasoning>"
     return (
         "Rules: Standard Minesweeper rules apply. You may only REVEAL or FLAG a single cell each turn.\n"
         f"Variant [{variant_code}] - {variant_name}: {variant_description}\n"

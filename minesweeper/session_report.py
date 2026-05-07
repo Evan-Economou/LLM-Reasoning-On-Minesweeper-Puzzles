@@ -128,7 +128,7 @@ def _load_puzzle_lookup(input_paths: list[str]) -> dict[str, object]:
             seen.add(key)
             candidates.append(candidate)
 
-    fallback = Path("datasets/puzzles.jsonl")
+    fallback = Path("docs/puzzles.jsonl")
     if str(fallback) not in seen:
         candidates.append(fallback)
 

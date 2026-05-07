@@ -245,6 +245,7 @@ def cmd_llm_eval(args: argparse.Namespace) -> int:
         top_p=args.top_p,
         repetition_penalty=args.repetition_penalty,
         no_repeat_ngram_size=args.no_repeat_ngram_size,
+        thinking_budget_tokens=args.thinking_budget_tokens,
     )
     summary = run_model_llm_dataset(
         dataset_path=args.dataset,
@@ -257,6 +258,7 @@ def cmd_llm_eval(args: argparse.Namespace) -> int:
         max_turn_multiplier=args.max_turn_multiplier,
         include_cot=args.include_cot,
         reminder_each_turn=args.reminder_each_turn,
+        resume_from=args.resume_from,
     )
     print(
         f"Evaluated {summary.evaluated} puzzles with {summary.provider}:{summary.model_id} | "
@@ -375,12 +377,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     llm_eval.add_argument("--max-turn-multiplier", type=int, default=3)
     llm_eval.add_argument("--include-cot", action="store_true")
+    llm_eval.add_argument(
+        "--thinking-budget-tokens",
+        type=int,
+        default=2000,
+        help="Token budget for Anthropic extended thinking (used when --include-cot and provider=anthropic).",
+    )
     llm_eval.add_argument("--reminder-each-turn", action="store_true")
+    llm_eval.add_argument(
+        "--resume-from",
+        default=None,
+        metavar="SESSION_JSONL",
+        help="Path to an existing session log; puzzles already present in that file are skipped per variant up to --limit.",
+    )
     llm_eval.set_defaults(func=cmd_llm_eval)
 
     session_report = subparsers.add_parser("session-report", help="Build an interactive HTML dashboard from session JSONL logs")
     session_report.add_argument("--input", nargs="+", default=["datasets/model_sessions.jsonl"])
-    session_report.add_argument("--output", default="datasets/session_dashboard.html")
+    session_report.add_argument("--output", default="docs/session_dashboard.html")
     session_report.add_argument("--title", default="Minesweeper Session Dashboard")
     session_report.set_defaults(func=cmd_session_report)
 

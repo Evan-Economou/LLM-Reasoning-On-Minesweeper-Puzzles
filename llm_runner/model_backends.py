@@ -25,12 +25,15 @@ class ChatModelConfig:
     top_p: float = 1.0
     repetition_penalty: float = 1.12
     no_repeat_ngram_size: int = 4
+    extended_thinking: bool = False
+    thinking_budget_tokens: int = 2000
 
 
 @dataclass(frozen=True, slots=True)
 class GenerateResult:
     text: str
     usage: dict | None  # {"input_tokens": int, "output_tokens": int} or None for backends that don't report it
+    thinking: str | None = None  # Extended thinking content (Anthropic only)
 
 
 class ChatBackend(Protocol):
@@ -130,26 +133,53 @@ class AnthropicChatBackend:
 
         self._client = Anthropic(api_key=config.api_key)
 
-    def generate(self, messages: Sequence[ChatMessage]) -> str:
+    def generate(self, messages: Sequence[ChatMessage]) -> GenerateResult:
         system_prompt, chat_messages = _split_system_messages(messages)
-        request_kwargs = {
-            "model": self.model_id,
-            "messages": chat_messages,
-            "max_tokens": max(1, self.config.max_new_tokens),
-            "temperature": self.config.temperature,
-            "top_p": self.config.top_p,
-        }
+
+        if self.config.extended_thinking:
+            budget = self.config.thinking_budget_tokens
+            # max_tokens must exceed budget; leave room for the text response
+            max_tokens = max(self.config.max_new_tokens, budget + 1000)
+            request_kwargs: dict = {
+                "model": self.model_id,
+                "messages": chat_messages,
+                "max_tokens": max_tokens,
+                # Extended thinking requires temperature=1
+                "temperature": 1,
+                "thinking": {"type": "enabled", "budget_tokens": budget},
+            }
+        else:
+            request_kwargs = {
+                "model": self.model_id,
+                "messages": chat_messages,
+                "max_tokens": max(1, self.config.max_new_tokens),
+                "temperature": self.config.temperature,
+            }
+            # Anthropic rejects requests that specify both temperature and top_p
+            if self.config.top_p != 1.0:
+                request_kwargs["top_p"] = self.config.top_p
+
         if system_prompt:
             request_kwargs["system"] = system_prompt
+
         response = self._client.messages.create(**request_kwargs)
-        content_parts = [part.text for part in response.content if hasattr(part, "text")]
-        content = "".join(content_parts).strip()
+
+        thinking_content: str | None = None
+        text_parts: list[str] = []
+        for part in response.content:
+            if getattr(part, "type", None) == "thinking":
+                thinking_content = getattr(part, "thinking", None)
+            elif hasattr(part, "text"):
+                text_parts.append(part.text)
+
+        content = "".join(text_parts).strip()
         if not content:
             raise RuntimeError(f"Anthropic returned an empty message for model {self.model_id}")
+
         usage = None
         if response.usage is not None:
             usage = {
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
             }
-        return GenerateResult(text=content, usage=usage)
+        return GenerateResult(text=content, usage=usage, thinking=thinking_content)
