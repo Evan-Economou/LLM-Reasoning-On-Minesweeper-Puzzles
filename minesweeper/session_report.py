@@ -50,6 +50,10 @@ def build_session_dashboard(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html_text, encoding="utf-8")
 
+    nojekyll = path.parent / ".nojekyll"
+    if not nojekyll.exists():
+        nojekyll.touch()
+
     return {
         "output_path": str(path),
         "sessions": len(normalized),
@@ -257,7 +261,7 @@ def _render_dashboard_html(
         "summary": summary,
         "input_paths": input_paths,
     }
-    data_json = json.dumps(data_payload, ensure_ascii=True)
+    data_json = json.dumps(data_payload, ensure_ascii=True).replace("</", "<\\/")
     escaped_title = html.escape(title)
 
     html_template = """<!doctype html>

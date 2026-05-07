@@ -394,7 +394,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     session_report = subparsers.add_parser("session-report", help="Build an interactive HTML dashboard from session JSONL logs")
     session_report.add_argument("--input", nargs="+", default=["datasets/model_sessions.jsonl"])
-    session_report.add_argument("--output", default="docs/session_dashboard.html")
+    session_report.add_argument("--output", default="docs/index.html")
     session_report.add_argument("--title", default="Minesweeper Session Dashboard")
     session_report.set_defaults(func=cmd_session_report)
 
