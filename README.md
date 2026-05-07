@@ -204,3 +204,6 @@ This coalesces all of the listed session reports and builds an html dashboard to
   uv run python data_processing/visualize.py docs/haiku_cot_sessions.jsonl
   # or just one plot:
   uv run python data_processing/visualize.py docs/haiku_cot_sessions.jsonl --only win_rate failure_analysis
+
+
+  python -m minesweeper llm-eval --dataset datasets/outside_puzzles.jsonl --provider anthropic --model-id claude-haiku-4-5-20251001 --api-key "$ANTHROPIC_API_KEY" --session-log datasets/outside_haiku_sessions.jsonl --include-cot --player-id haiku_cot --limit 5

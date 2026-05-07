@@ -269,16 +269,22 @@ def cmd_llm_eval(args: argparse.Namespace) -> int:
 
 
 def cmd_session_report(args: argparse.Namespace) -> int:
+    results_output_path: str | None = None
+    if hasattr(args, "results_output") and args.results_output is not None:
+        results_output_path = args.results_output
     summary = build_session_dashboard(
         input_paths=args.input,
         output_path=args.output,
         title=args.title,
+        results_output_path=results_output_path,
     )
     print(
         f"Dashboard generated with {summary['sessions']} sessions "
         f"(won={summary['won']} lost={summary['lost']} aborted={summary['aborted']}) | "
         f"output={summary['output_path']}"
     )
+    if summary.get("results_path"):
+        print(f"Results page: {summary['results_path']}")
     return 0
 
 
@@ -395,7 +401,8 @@ def build_parser() -> argparse.ArgumentParser:
     session_report = subparsers.add_parser("session-report", help="Build an interactive HTML dashboard from session JSONL logs")
     session_report.add_argument("--input", nargs="+", default=["datasets/model_sessions.jsonl"])
     session_report.add_argument("--output", default="docs/index.html")
-    session_report.add_argument("--title", default="Minesweeper Session Dashboard")
+    session_report.add_argument("--title", default="LLM Minesweeper Benchmark")
+    session_report.add_argument("--results-output", default=None, help="Path for results page (default: auto-derive as results.html next to --output)")
     session_report.set_defaults(func=cmd_session_report)
 
     return parser

@@ -97,26 +97,27 @@ class TripletVariant(StandardVariant):
 class OutsideVariant(StandardVariant):
     code: str = "O"
     name: str = "Outside"
-    description: str = "Safe cells are connected, and each mine must connect to the border through mines."
+    description: str = "All mines connect orthogonally to the border; all non-mine cells are orthogonally connected."
 
     def validate_solution(self, board: MinesweeperBoard) -> bool:
         mines = _mine_positions(board)
         safe = {position for position in board.positions() if position not in mines}
+
         if safe:
-            safe_seen = _flood_fill(board, {next(iter(safe))}, safe, include_diagonal=True)
+            safe_seen = _flood_fill(board, {next(iter(safe))}, safe, include_diagonal=False)
             if len(safe_seen) != len(safe):
                 return False
 
+        if not mines:
+            return True
         border_mines = {
             position
             for position in mines
             if position.row in (0, board.size - 1) or position.col in (0, board.size - 1)
         }
-        if not mines:
-            return True
         if not border_mines:
             return False
-        mine_seen = _flood_fill(board, {next(iter(border_mines))}, mines, include_diagonal=True)
+        mine_seen = _flood_fill(board, border_mines, mines, include_diagonal=False)
         return len(mine_seen) == len(mines)
 
 

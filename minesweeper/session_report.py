@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +23,8 @@ _BOARD_ENCODER = TextBoardEncoder()
 def build_session_dashboard(
     input_paths: list[str],
     output_path: str,
-    title: str = "Minesweeper Session Dashboard",
+    title: str = "LLM Minesweeper Benchmark",
+    results_output_path: str | None = None,
 ) -> dict[str, int | str]:
     sessions: list[dict] = []
     for raw_path in input_paths:
@@ -38,24 +40,50 @@ def build_session_dashboard(
 
     normalized.sort(key=lambda item: item.get("started_at_utc", ""), reverse=True)
     summary = _build_summary(normalized)
+
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if results_output_path is None:
+        results_path: Path | None = path.with_name("results.html")
+    elif not results_output_path:
+        results_path = None
+    else:
+        results_path = Path(results_output_path)
+
+    results_url = results_path.name if results_path else ""
+
     html_text = _render_dashboard_html(
         title=title,
         generated_at_utc=_now_iso(),
         sessions=normalized,
         summary=summary,
         input_paths=input_paths,
+        results_url=results_url,
     )
-
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html_text, encoding="utf-8")
 
     nojekyll = path.parent / ".nojekyll"
     if not nojekyll.exists():
         nojekyll.touch()
 
+    results_out = ""
+    if results_path is not None:
+        figures_dir = path.parent / "figures"
+        descriptions_path = _find_descriptions_file(path)
+        results_html = _render_results_html(
+            title=title,
+            figures_dir=figures_dir,
+            descriptions_path=descriptions_path,
+            dashboard_url=path.name,
+        )
+        results_path.parent.mkdir(parents=True, exist_ok=True)
+        results_path.write_text(results_html, encoding="utf-8")
+        results_out = str(results_path)
+
     return {
         "output_path": str(path),
+        "results_path": results_out,
         "sessions": len(normalized),
         "won": summary["won"],
         "lost": summary["lost"],
@@ -66,9 +94,6 @@ def build_session_dashboard(
 def _read_jsonl_sessions(input_path: str) -> list[dict]:
     path = Path(input_path)
     if not path.exists():
-        # Try resolving relative to the project root (package parent). If still missing,
-        # warn and skip this input rather than raising so dashboards can be built
-        # from a subset of provided files.
         alt = Path(__file__).resolve().parents[1] / input_path
         if alt.exists():
             path = alt
@@ -247,12 +272,198 @@ def _build_summary(sessions: list[dict]) -> dict[str, int]:
     return summary
 
 
+def _find_descriptions_file(output_path: Path) -> Path | None:
+    candidates = [
+        output_path.parent.parent / "data_processing" / "plots_description.md",
+        Path(__file__).resolve().parents[1] / "data_processing" / "plots_description.md",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def _parse_plot_descriptions(md_path: Path) -> list[dict[str, str]]:
+    text = md_path.read_text(encoding="utf-8")
+    sections = re.split(r"\n## ", "\n" + text)
+    plots = []
+    for section in sections[1:]:
+        lines = section.strip().split("\n")
+        if not lines:
+            continue
+        header = lines[0].strip()
+        m = re.match(r"^(\S+\.png)\s+[—\-–]\s+(.+)$", header)
+        if m:
+            filename = m.group(1)
+            title_str = m.group(2)
+        else:
+            parts = header.split(" ", 1)
+            filename = parts[0] if parts else ""
+            title_str = parts[1] if len(parts) > 1 else header
+        body = "\n".join(lines[1:]).strip()
+        if filename:
+            plots.append({"filename": filename, "title": title_str, "body": body})
+    return plots
+
+
+def _md_to_html(text: str) -> str:
+    parts = re.split(r"\*\*(.+?)\*\*", text)
+    escaped_parts = []
+    for i, part in enumerate(parts):
+        if i % 2 == 0:
+            escaped_parts.append(html.escape(part))
+        else:
+            escaped_parts.append(f"<strong>{html.escape(part)}</strong>")
+    result = "".join(escaped_parts)
+
+    paragraphs = re.split(r"\n{2,}", result)
+    html_parts = []
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        lines = para.split("\n")
+        if any(ln.strip().startswith("- ") for ln in lines):
+            items = "".join(
+                f"<li>{ln.strip()[2:]}</li>"
+                for ln in lines
+                if ln.strip().startswith("- ")
+            )
+            html_parts.append(f'<ul style="margin:4px 0 4px 20px;padding:0;">{items}</ul>')
+        else:
+            html_parts.append(f'<p style="margin:6px 0;">{" ".join(ln.strip() for ln in lines if ln.strip())}</p>')
+    return "".join(html_parts)
+
+
+def _render_results_html(
+    title: str,
+    figures_dir: Path,
+    descriptions_path: Path | None,
+    dashboard_url: str = "index.html",
+) -> str:
+    plots: list[dict[str, str]] = []
+    if descriptions_path and descriptions_path.exists():
+        plots = _parse_plot_descriptions(descriptions_path)
+
+    found_filenames: set[str] = set()
+    if figures_dir.exists():
+        found_filenames = {p.name for p in figures_dir.glob("*.png")}
+
+    described = {p["filename"] for p in plots}
+
+    card_parts: list[str] = []
+    for plot in plots:
+        img_src = f"figures/{plot['filename']}"
+        body_html = _md_to_html(plot["body"]) if plot["body"] else ""
+        esc_title = html.escape(plot["title"])
+        card_parts.append(f"""
+    <div class="fig-card">
+      <div class="fig-card-title">{esc_title}</div>
+      <div class="fig-layout">
+        <div class="fig-img-col">
+          <img src="{img_src}" alt="{esc_title}" loading="lazy" />
+        </div>
+        <div class="fig-desc-col">{body_html}</div>
+      </div>
+    </div>""")
+
+    for fname in sorted(found_filenames - described):
+        display = html.escape(fname.replace("_", " ").replace(".png", "").title())
+        card_parts.append(f"""
+    <div class="fig-card">
+      <div class="fig-card-title">{display}</div>
+      <div class="fig-layout">
+        <div class="fig-img-col">
+          <img src="figures/{fname}" alt="{display}" loading="lazy" />
+        </div>
+        <div class="fig-desc-col"></div>
+      </div>
+    </div>""")
+
+    cards_html = "\n".join(card_parts) if card_parts else '<p style="color:#5c6b64;">No figures found.</p>'
+    esc_title = html.escape(title)
+    esc_dash = html.escape(dashboard_url)
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{esc_title} — Results</title>
+  <style>
+    :root {{
+      --bg: #f4f1ea; --panel: #fffdf8; --ink: #1e2b26; --muted: #5c6b64;
+      --line: #d9d1c2; --ok: #2f7d4a; --bad: #a83c2f; --warn: #9b6a12; --accent: #0b5c66;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0; color: var(--ink);
+      background: radial-gradient(circle at 10% 10%, #efe6d5 0%, transparent 35%),
+                  radial-gradient(circle at 90% 90%, #dfe9e4 0%, transparent 45%), var(--bg);
+      font-family: Georgia, "Times New Roman", serif;
+    }}
+    .shell {{ max-width: 1280px; margin: 0 auto; padding: 24px; }}
+    .hero {{
+      background: linear-gradient(110deg, #fff8ea, #edf8f3);
+      border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px;
+      box-shadow: 0 8px 24px rgba(30,43,38,0.08);
+    }}
+    h1 {{ margin: 0; font-size: 30px; letter-spacing: 0.2px; }}
+    .subtle {{ color: var(--muted); font-size: 14px; }}
+    .site-nav {{ margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }}
+    .nav-link {{
+      display: inline-block; padding: 8px 18px; border: 1px solid var(--line);
+      border-radius: 8px; text-decoration: none; color: var(--accent);
+      font-size: 14px; font-weight: 600; background: var(--panel);
+    }}
+    .nav-link:hover {{ background: #edf8f3; }}
+    .nav-active {{ background: var(--accent); color: #fff; border-color: var(--accent); }}
+    .nav-active:hover {{ background: var(--accent); }}
+    .fig-card {{
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 12px; overflow: hidden; margin-top: 20px;
+    }}
+    .fig-card-title {{
+      padding: 12px 16px; font-size: 16px; font-weight: bold;
+      border-bottom: 1px solid var(--line); background: #f8f3e9;
+    }}
+    .fig-layout {{ display: grid; grid-template-columns: 1fr 1fr; }}
+    .fig-img-col {{
+      padding: 16px; border-right: 1px solid var(--line); background: #fff;
+    }}
+    .fig-img-col img {{ width: 100%; height: auto; display: block; border-radius: 6px; }}
+    .fig-desc-col {{
+      padding: 16px; font-size: 13px; line-height: 1.65; color: var(--ink);
+    }}
+    @media (max-width: 780px) {{
+      .fig-layout {{ grid-template-columns: 1fr; }}
+      .fig-img-col {{ border-right: none; border-bottom: 1px solid var(--line); }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav class="site-nav">
+      <a href="{esc_dash}" class="nav-link">Session Browser</a>
+      <a href="#" class="nav-link nav-active">Results &amp; Analysis</a>
+    </nav>
+    <section class="hero">
+      <h1>{esc_title}</h1>
+      <div class="subtle">Results &amp; Analysis — Figures and Interpretations</div>
+    </section>
+    {cards_html}
+  </div>
+</body>
+</html>"""
+
+
 def _render_dashboard_html(
     title: str,
     generated_at_utc: str,
     sessions: list[dict],
     summary: dict[str, int],
     input_paths: list[str],
+    results_url: str = "results.html",
 ) -> str:
     data_payload = {
         "title": title,
@@ -263,6 +474,7 @@ def _render_dashboard_html(
     }
     data_json = json.dumps(data_payload, ensure_ascii=True).replace("</", "<\\/")
     escaped_title = html.escape(title)
+    escaped_results_url = html.escape(results_url)
 
     html_template = """<!doctype html>
 <html lang="en">
@@ -293,6 +505,21 @@ def _render_dashboard_html(
       font-family: Georgia, "Times New Roman", serif;
     }
     .shell { max-width: 1280px; margin: 0 auto; padding: 24px; }
+    .site-nav { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav-link {
+      display: inline-block;
+      padding: 8px 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      text-decoration: none;
+      color: var(--accent);
+      font-size: 14px;
+      font-weight: 600;
+      background: var(--panel);
+    }
+    .nav-link:hover { background: #edf8f3; }
+    .nav-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .nav-active:hover { background: var(--accent); }
     .hero {
       background: linear-gradient(110deg, #fff8ea, #edf8f3);
       border: 1px solid var(--line);
@@ -338,18 +565,13 @@ def _render_dashboard_html(
       color: var(--ink);
       font-size: 14px;
     }
-    .layout {
-      margin-top: 16px;
-      display: grid;
-      grid-template-columns: 1.4fr 1fr;
-      gap: 12px;
-    }
+    .table-section { margin-top: 16px; }
     .table-wrap {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 12px;
       overflow: auto;
-      max-height: 68vh;
+      max-height: 55vh;
     }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     thead th {
@@ -373,18 +595,58 @@ def _render_dashboard_html(
       font-size: 12px;
       font-weight: bold;
     }
-    .detail {
+    /* ── Detail panel (full-width, below table) ── */
+    .detail-panel {
+      display: none;
+      margin-top: 16px;
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 12px;
-      padding: 12px;
-      overflow: auto;
-      max-height: 68vh;
+      padding: 16px;
     }
-    .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-    .meta .card { min-height: 58px; }
+    .detail-panel.open { display: block; }
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .detail-title { font-size: 17px; font-weight: bold; margin: 0; }
+    .close-btn {
+      background: none;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--muted);
+      font-family: inherit;
+    }
+    .close-btn:hover { background: #f0ede7; color: var(--ink); }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .meta .card { min-height: 52px; }
     .moves { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
     .moves table { font-size: 12px; }
+    .moves tbody td {
+      word-break: break-word;
+      white-space: pre-wrap;
+      max-width: 0;
+    }
+    .moves col.col-turn   { width: 44px; }
+    .moves col.col-action { width: 68px; }
+    .moves col.col-coord  { width: 72px; }
+    .moves col.col-reason { width: auto; }
+    .moves col.col-chg    { width: 64px; }
+    .moves col.col-mine   { width: 72px; }
+    .moves col.col-status { width: 96px; }
+    .moves col.col-err    { width: 130px; }
     .board-progress { display: grid; gap: 10px; margin-top: 12px; }
     .board-card {
       border: 1px solid var(--line);
@@ -420,7 +682,7 @@ def _render_dashboard_html(
       overflow: auto;
     }
     .ms-board {
-      --cell: 28px;
+      --cell: 32px;
       display: grid;
       grid-template-columns: var(--cell) repeat(var(--size, 5), var(--cell));
       grid-auto-rows: var(--cell);
@@ -430,8 +692,7 @@ def _render_dashboard_html(
       justify-items: center;
       font-family: "Courier New", monospace;
     }
-    .axis,
-    .corner {
+    .axis, .corner {
       color: #64756a;
       font-size: 11px;
       font-weight: bold;
@@ -458,31 +719,14 @@ def _render_dashboard_html(
       background: linear-gradient(180deg, #dbe5dd, #c8d5cb);
       border-color: #98a99c;
       color: transparent;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
     }
-    .tile-flag {
-      background: #f8d9a0;
-      border-color: #c08f3f;
-      color: #6e4208;
-    }
-    .tile-mine {
-      background: #f4b1a8;
-      border-color: #b2473c;
-      color: #5f1d16;
-    }
-    .tile-safe {
-      background: #f2f7f3;
-      border-color: #c2cec5;
-      color: #52645a;
-    }
-    .n1 { color: #2269b5; }
-    .n2 { color: #2f8f49; }
-    .n3 { color: #c74a3a; }
-    .n4 { color: #6842b2; }
-    .n5 { color: #a25414; }
-    .n6 { color: #0e7b84; }
-    .n7 { color: #37414b; }
-    .n8 { color: #6f7b84; }
+    .tile-flag  { background: #f8d9a0; border-color: #c08f3f; color: #6e4208; }
+    .tile-mine  { background: #f4b1a8; border-color: #b2473c; color: #5f1d16; }
+    .tile-safe  { background: #f2f7f3; border-color: #c2cec5; color: #52645a; }
+    .n1 { color: #2269b5; } .n2 { color: #2f8f49; } .n3 { color: #c74a3a; }
+    .n4 { color: #6842b2; } .n5 { color: #a25414; } .n6 { color: #0e7b84; }
+    .n7 { color: #37414b; } .n8 { color: #6f7b84; }
     .board-fallback { margin-top: 8px; }
     .code {
       white-space: pre-wrap;
@@ -492,30 +736,18 @@ def _render_dashboard_html(
       padding: 8px;
       font-family: "Courier New", monospace;
       font-size: 12px;
-      max-height: 200px;
+      max-height: 380px;
       overflow: auto;
     }
     details { margin-top: 6px; }
     summary { cursor: pointer; color: var(--accent); }
-    @media (max-width: 980px) {
-      .stats { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
-      .controls { grid-template-columns: 1fr; }
-      .layout { grid-template-columns: 1fr; }
-      .meta { grid-template-columns: 1fr; }
-      .io-grid { grid-template-columns: 1fr; }
-    }
     .io-grid {
       margin-top: 8px;
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 8px;
     }
-    .io-card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      overflow: hidden;
-    }
+    .io-card { border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
     .io-head {
       padding: 6px 8px;
       font-size: 12px;
@@ -534,67 +766,34 @@ def _render_dashboard_html(
       border-radius: 12px;
       padding: 12px;
     }
-    .rules-menu summary {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--accent);
-      cursor: pointer;
-      user-select: none;
-    }
+    .rules-menu summary { font-size: 14px; font-weight: 600; color: var(--accent); cursor: pointer; user-select: none; }
     .rules-content {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid var(--line);
-      color: var(--ink);
-      font-size: 13px;
-      line-height: 1.6;
+      margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line);
+      color: var(--ink); font-size: 13px; line-height: 1.6;
     }
-    .rules-section {
-      margin-bottom: 14px;
-    }
-    .rules-section h3 {
-      margin: 8px 0 6px 0;
-      font-size: 13px;
-      font-weight: bold;
-      color: var(--ink);
-    }
-    .rules-section p {
-      margin: 6px 0;
-      color: var(--ink);
-    }
-    .variant-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 12px;
-      margin-top: 8px;
-    }
-    .variant-card {
-      border: 1px solid #ddd4c1;
-      border-radius: 8px;
-      padding: 8px;
-      background: #fbfaf6;
-    }
-    .variant-code {
-      font-weight: bold;
-      color: var(--accent);
-      font-family: "Courier New", monospace;
-      font-size: 12px;
-    }
-    .variant-name {
-      font-weight: 600;
-      color: var(--ink);
-      font-size: 12px;
-    }
-    .variant-desc {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 4px;
-      line-height: 1.4;
+    .rules-section { margin-bottom: 14px; }
+    .rules-section h3 { margin: 8px 0 6px 0; font-size: 13px; font-weight: bold; color: var(--ink); }
+    .rules-section p { margin: 6px 0; color: var(--ink); }
+    .variant-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 8px; }
+    .variant-card { border: 1px solid #ddd4c1; border-radius: 8px; padding: 8px; background: #fbfaf6; }
+    .variant-code { font-weight: bold; color: var(--accent); font-family: "Courier New", monospace; font-size: 12px; }
+    .variant-name { font-weight: 600; color: var(--ink); font-size: 12px; }
+    .variant-desc { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.4; }
+    @media (max-width: 980px) {
+      .stats { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+      .controls { grid-template-columns: 1fr; }
+      .meta { grid-template-columns: repeat(2, 1fr); }
+      .io-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <div class="shell">
+    <nav class="site-nav">
+      <a href="#" class="nav-link nav-active">Session Browser</a>
+      <a href="__RESULTS_URL__" class="nav-link">Results &amp; Analysis</a>
+    </nav>
+
     <section class="hero">
       <h1 id="title"></h1>
       <div class="subtle" id="meta"></div>
@@ -621,7 +820,7 @@ def _render_dashboard_html(
 
     <section class="rules-menu">
       <details>
-        <summary>Minesweeper Base Rules & Variants</summary>
+        <summary>Minesweeper Base Rules &amp; Variants</summary>
         <div class="rules-content">
           <div class="rules-section">
             <h3>Basic Minesweeper Rules</h3>
@@ -634,78 +833,29 @@ def _render_dashboard_html(
               <li>Lose by revealing a mine</li>
             </ul>
           </div>
-
           <div class="rules-section">
             <h3>Variant Rules</h3>
             <p>Standard Minesweeper can be modified with additional constraints:</p>
             <div class="variant-grid">
-              <div class="variant-card">
-                <div class="variant-code">STD</div>
-                <div class="variant-name">Standard</div>
-                <div class="variant-desc">Classic Minesweeper rules with no additional constraints.</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">Q</div>
-                <div class="variant-name">Quad</div>
-                <div class="variant-desc">Each 2×2 block must contain at least one mine.</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">C</div>
-                <div class="variant-name">Connected</div>
-                <div class="variant-desc">All mines must be in one 8-connected component.</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">T</div>
-                <div class="variant-name">Triplet</div>
-                <div class="variant-desc">No 3 mines can appear in a contiguous line (horizontal, vertical, or diagonal).</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">O</div>
-                <div class="variant-name">Outside</div>
-                <div class="variant-desc">Safe cells are connected. Each mine must connect to the border through mines.</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">D</div>
-                <div class="variant-name">Dual</div>
-                <div class="variant-desc">Mines form disjoint non-touching orthogonal pairs (exactly 2 mines per pair).</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">S</div>
-                <div class="variant-name">Snake</div>
-                <div class="variant-desc">Mines form one non-self-intersecting orthogonal path.</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">B</div>
-                <div class="variant-name">Balance</div>
-                <div class="variant-desc">All rows and columns contain the same number of mines.</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">H</div>
-                <div class="variant-name">Horizontal</div>
-                <div class="variant-desc">No two mines can touch horizontally (orthogonal pairs are forbidden).</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">P</div>
-                <div class="variant-name">Partition</div>
-                <div class="variant-desc">Clue number = count of consecutive mine groups in the 8-neighbor ring around the cell.</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">L</div>
-                <div class="variant-name">Liar</div>
-                <div class="variant-desc">Each clue differs from the true adjacent mine count by exactly one.</div>
-              </div>
-              <div class="variant-card">
-                <div class="variant-code">X</div>
-                <div class="variant-name">Cross</div>
-                <div class="variant-desc">Clue counts mines in a plus-shaped region (up to distance 2 in cardinal directions).</div>
-              </div>
+              <div class="variant-card"><div class="variant-code">STD</div><div class="variant-name">Standard</div><div class="variant-desc">Classic Minesweeper rules with no additional constraints.</div></div>
+              <div class="variant-card"><div class="variant-code">Q</div><div class="variant-name">Quad</div><div class="variant-desc">Each 2×2 block must contain at least one mine.</div></div>
+              <div class="variant-card"><div class="variant-code">C</div><div class="variant-name">Connected</div><div class="variant-desc">All mines must be in one 8-connected component.</div></div>
+              <div class="variant-card"><div class="variant-code">T</div><div class="variant-name">Triplet</div><div class="variant-desc">No 3 mines can appear in a contiguous line (horizontal, vertical, or diagonal).</div></div>
+              <div class="variant-card"><div class="variant-code">O</div><div class="variant-name">Outside</div><div class="variant-desc">Safe cells are connected. Each mine must connect to the border through mines.</div></div>
+              <div class="variant-card"><div class="variant-code">D</div><div class="variant-name">Dual</div><div class="variant-desc">Mines form disjoint non-touching orthogonal pairs (exactly 2 mines per pair).</div></div>
+              <div class="variant-card"><div class="variant-code">S</div><div class="variant-name">Snake</div><div class="variant-desc">Mines form one non-self-intersecting orthogonal path.</div></div>
+              <div class="variant-card"><div class="variant-code">B</div><div class="variant-name">Balance</div><div class="variant-desc">All rows and columns contain the same number of mines.</div></div>
+              <div class="variant-card"><div class="variant-code">H</div><div class="variant-name">Horizontal</div><div class="variant-desc">No two mines can touch horizontally (orthogonal pairs are forbidden).</div></div>
+              <div class="variant-card"><div class="variant-code">P</div><div class="variant-name">Partition</div><div class="variant-desc">Clue number = count of consecutive mine groups in the 8-neighbor ring around the cell.</div></div>
+              <div class="variant-card"><div class="variant-code">L</div><div class="variant-name">Liar</div><div class="variant-desc">Each clue differs from the true adjacent mine count by exactly one.</div></div>
+              <div class="variant-card"><div class="variant-code">X</div><div class="variant-name">Cross</div><div class="variant-desc">Clue counts mines in a plus-shaped region (up to distance 2 in cardinal directions).</div></div>
             </div>
           </div>
         </div>
       </details>
     </section>
 
-    <section class="layout">
+    <div class="table-section">
       <div class="table-wrap">
         <table id="session-table">
           <thead>
@@ -722,13 +872,15 @@ def _render_dashboard_html(
           <tbody id="session-body"></tbody>
         </table>
       </div>
+    </div>
 
-      <aside class="detail">
-        <h2 style="margin-top:0;">Session Details</h2>
-        <div class="subtle">Click a row to inspect the board after each move and the raw model outputs.</div>
-        <div id="detail" class="subtle" style="margin-top:10px;">No session selected.</div>
-      </aside>
-    </section>
+    <div class="detail-panel" id="detail-panel">
+      <div class="detail-header">
+        <h2 class="detail-title">Session Details</h2>
+        <button class="close-btn" id="close-detail">Close ✕</button>
+      </div>
+      <div id="detail"></div>
+    </div>
   </div>
 
   <script id="dashboard-data" type="application/json">__DATA_JSON__</script>
@@ -753,18 +905,19 @@ def _render_dashboard_html(
     titleEl.textContent = data.title;
     metaEl.textContent = `Generated ${data.generated_at_utc} from ${data.input_paths.length} file(s)`;
 
-    const statTotal = document.getElementById('stat-total');
-    const statWon = document.getElementById('stat-won');
-    const statLost = document.getElementById('stat-lost');
+    const statTotal   = document.getElementById('stat-total');
+    const statWon     = document.getElementById('stat-won');
+    const statLost    = document.getElementById('stat-lost');
     const statAborted = document.getElementById('stat-aborted');
     const statWinrate = document.getElementById('stat-winrate');
 
-    const searchEl = document.getElementById('search');
-    const variantEl = document.getElementById('variant');
-    const outcomeEl = document.getElementById('outcome');
-    const failureEl = document.getElementById('failure');
-    const bodyEl = document.getElementById('session-body');
-    const detailEl = document.getElementById('detail');
+    const searchEl   = document.getElementById('search');
+    const variantEl  = document.getElementById('variant');
+    const outcomeEl  = document.getElementById('outcome');
+    const failureEl  = document.getElementById('failure');
+    const bodyEl     = document.getElementById('session-body');
+    const detailEl   = document.getElementById('detail');
+    const panelEl    = document.getElementById('detail-panel');
 
     function outcomeLabel(s) {
       if (s.won) return 'won';
@@ -788,126 +941,78 @@ def _render_dashboard_html(
 
     function parseBoardFromText(boardText) {
       if (!boardText) return null;
-      const lines = String(boardText)
-        .split('\\n')
-        .map((line) => line.trimEnd());
-      const rowLines = lines.filter((line) => /^\\d+\\s+/.test(line));
+      const lines = String(boardText).split('\\n').map((l) => l.trimEnd());
+      const rowLines = lines.filter((l) => /^\\d+\\s+/.test(l));
       if (rowLines.length === 0) return null;
-
       const rows = [];
       let maxWidth = 0;
       for (const rowLine of rowLines) {
         const tokens = rowLine.trim().split(/\\s+/).slice(1);
-        if (tokens.length > 0) {
-          rows.push(tokens);
-          maxWidth = Math.max(maxWidth, tokens.length);
-        }
+        if (tokens.length > 0) { rows.push(tokens); maxWidth = Math.max(maxWidth, tokens.length); }
       }
       if (rows.length === 0 || maxWidth === 0) return null;
-
-      const normalizedRows = rows.map((tokens, rowIndex) => {
+      const normalizedRows = rows.map((tokens, ri) => {
         const padded = [...tokens];
         while (padded.length < maxWidth) padded.push('#');
-        return padded.map((token, colIndex) => ({
-          row: rowIndex,
-          col: colIndex,
-          coord: `${rowIndex + 1},${colIndex + 1}`,
-          token,
-        }));
+        return padded.map((token, ci) => ({ row: ri, col: ci, coord: `${ri+1},${ci+1}`, token }));
       });
-
-      return {
-        size: maxWidth,
-        rows: normalizedRows,
-      };
+      return { size: maxWidth, rows: normalizedRows };
     }
 
     function renderBoardGrid(boardGrid, boardText) {
       const grid = boardGrid || parseBoardFromText(boardText || '');
-      if (!grid || !Array.isArray(grid.rows) || grid.rows.length === 0) {
+      if (!grid || !Array.isArray(grid.rows) || grid.rows.length === 0)
         return `<pre class="board-text">${escapeHtml(boardText || '(unavailable)')}</pre>`;
-      }
-
       const size = Number(grid.size || (grid.rows[0] ? grid.rows[0].length : 0) || 0);
-      if (!size) {
-        return `<pre class="board-text">${escapeHtml(boardText || '(unavailable)')}</pre>`;
-      }
+      if (!size) return `<pre class="board-text">${escapeHtml(boardText || '(unavailable)')}</pre>`;
 
-      let htmlOut = `<div class="board-figure"><div class="ms-board" style="--size:${size}">`;
-      htmlOut += `<div class="corner"></div>`;
-      for (let col = 0; col < size; col += 1) {
-        htmlOut += `<div class="axis">${col + 1}</div>`;
-      }
-
-      for (let row = 0; row < grid.rows.length; row += 1) {
-        htmlOut += `<div class="axis">${row + 1}</div>`;
-        const cells = grid.rows[row] || [];
-        for (let col = 0; col < size; col += 1) {
-          const cell = cells[col] || { token: '#', coord: `${row + 1},${col + 1}` };
+      let h = `<div class="board-figure"><div class="ms-board" style="--size:${size}">`;
+      h += `<div class="corner"></div>`;
+      for (let c = 0; c < size; c++) h += `<div class="axis">${c+1}</div>`;
+      for (let r = 0; r < grid.rows.length; r++) {
+        h += `<div class="axis">${r+1}</div>`;
+        const cells = grid.rows[r] || [];
+        for (let c = 0; c < size; c++) {
+          const cell = cells[c] || { token: '#', coord: `${r+1},${c+1}` };
           const token = String(cell.token || '#');
-          const coord = String(cell.coord || `${row + 1},${col + 1}`);
-
-          let cls = 'tile tile-hidden';
-          let glyph = '';
-          if (token === 'F') {
-            cls = 'tile tile-flag';
-            glyph = 'F';
-          } else if (token === '*') {
-            cls = 'tile tile-mine';
-            glyph = '*';
-          } else if (token === '.' || /^\\d$/.test(token)) {
+          const coord = String(cell.coord || `${r+1},${c+1}`);
+          let cls = 'tile tile-hidden', glyph = '';
+          if (token === 'F')                        { cls = 'tile tile-flag'; glyph = 'F'; }
+          else if (token === '*')                   { cls = 'tile tile-mine'; glyph = '*'; }
+          else if (token === '.' || /^\\d$/.test(token)) {
             cls = 'tile tile-safe';
-            if (/^[1-8]$/.test(token)) {
-              cls += ` n${token}`;
-            }
+            if (/^[1-8]$/.test(token)) cls += ` n${token}`;
             glyph = token === '.' ? '' : token;
           }
-
-          htmlOut += `<div class="${cls}" title="${escapeHtml(coord)}">${escapeHtml(glyph)}</div>`;
+          h += `<div class="${cls}" title="${escapeHtml(coord)}">${escapeHtml(glyph)}</div>`;
         }
       }
-
-      htmlOut += `</div>`;
-      if (boardText) {
-        htmlOut += `<details class="board-fallback"><summary>Show ASCII board text</summary><pre class="board-text">${escapeHtml(boardText)}</pre></details>`;
-      }
-      htmlOut += `</div>`;
-      return htmlOut;
+      h += `</div>`;
+      if (boardText) h += `<details class="board-fallback"><summary>Show ASCII board text</summary><pre class="board-text">${escapeHtml(boardText)}</pre></details>`;
+      h += `</div>`;
+      return h;
     }
 
     function compare(a, b, key) {
       if (key === 'outcome') return outcomeLabel(a).localeCompare(outcomeLabel(b));
-      const left = a[key] ?? '';
-      const right = b[key] ?? '';
-      if (typeof left === 'number' || typeof right === 'number') {
-        return Number(left) - Number(right);
-      }
+      const left = a[key] ?? '', right = b[key] ?? '';
+      if (typeof left === 'number' || typeof right === 'number') return Number(left) - Number(right);
       return String(left).localeCompare(String(right));
     }
 
     function buildSelectOptions() {
       const variants = [...new Set(sessions.map((s) => s.variant_code).filter(Boolean))].sort();
       const failures = [...new Set(sessions.map((s) => s.failure_category).filter(Boolean))].sort();
-      for (const variant of variants) {
-        const opt = document.createElement('option');
-        opt.value = variant;
-        opt.textContent = variant;
-        variantEl.appendChild(opt);
-      }
-      for (const failure of failures) {
-        const opt = document.createElement('option');
-        opt.value = failure;
-        opt.textContent = failure;
-        failureEl.appendChild(opt);
-      }
+      for (const v of variants) { const o = document.createElement('option'); o.value = v; o.textContent = v; variantEl.appendChild(o); }
+      for (const f of failures) { const o = document.createElement('option'); o.value = f; o.textContent = f; failureEl.appendChild(o); }
     }
 
     function filteredSessions() {
       const needle = state.search.trim().toLowerCase();
       return sessions.filter((s) => {
-        if (state.variant && s.variant_code !== state.variant) return false;
-        if (state.failure && s.failure_category !== state.failure) return false;
-        if (state.outcome && outcomeLabel(s) !== state.outcome) return false;
+        if (state.variant  && s.variant_code     !== state.variant)  return false;
+        if (state.failure  && s.failure_category !== state.failure)  return false;
+        if (state.outcome  && outcomeLabel(s)    !== state.outcome)  return false;
         if (needle) {
           const hay = [s.session_id, s.puzzle_id, s.player_id, s.model_id, s.failure_category, s.variant_code].join(' ').toLowerCase();
           if (!hay.includes(needle)) return false;
@@ -917,19 +1022,13 @@ def _render_dashboard_html(
     }
 
     function updateStats(rows) {
-      let won = 0;
-      let lost = 0;
-      let aborted = 0;
-      for (const s of rows) {
-        if (s.won) won += 1;
-        else if (s.lost) lost += 1;
-        else aborted += 1;
-      }
+      let won = 0, lost = 0, aborted = 0;
+      for (const s of rows) { if (s.won) won++; else if (s.lost) lost++; else aborted++; }
       const total = rows.length;
-      const winRate = total === 0 ? 0 : Math.round((1000 * won) / total) / 10;
-      statTotal.textContent = String(total);
-      statWon.textContent = String(won);
-      statLost.textContent = String(lost);
+      const winRate = total === 0 ? 0 : Math.round(1000 * won / total) / 10;
+      statTotal.textContent   = String(total);
+      statWon.textContent     = String(won);
+      statLost.textContent    = String(lost);
       statAborted.textContent = String(aborted);
       statWinrate.textContent = `${winRate}%`;
     }
@@ -939,27 +1038,22 @@ def _render_dashboard_html(
         const cmp = compare(a, b, state.sortKey);
         return state.sortDir === 'asc' ? cmp : -cmp;
       });
-
       updateStats(rows);
       bodyEl.innerHTML = '';
       for (const s of rows) {
         const tr = document.createElement('tr');
         tr.dataset.sessionId = s.session_id;
         if (s.session_id === state.selectedSessionId) tr.classList.add('active');
-
         const outcome = outcomeLabel(s);
-        const outcomeClass = outcome === 'won' ? 'ok' : outcome === 'lost' ? 'bad' : 'warn';
-        const failure = s.failure_category || '-';
-
+        const cls = outcome === 'won' ? 'ok' : outcome === 'lost' ? 'bad' : 'warn';
         tr.innerHTML = `
           <td>${escapeHtml(s.player_id || '-')}</td>
           <td>${escapeHtml(s.model_id || '-')}</td>
           <td>${escapeHtml(s.variant_code || '-')}</td>
           <td>${escapeHtml(String(s.move_count || 0))}</td>
           <td>${escapeHtml(fmtSeconds(s.duration_seconds || 0))}</td>
-          <td>${escapeHtml(failure)}</td>
-          <td><span class="pill ${outcomeClass}">${escapeHtml(outcome)}</span></td>
-        `;
+          <td>${escapeHtml(s.failure_category || '-')}</td>
+          <td><span class="pill ${cls}">${escapeHtml(outcome)}</span></td>`;
         tr.addEventListener('click', () => {
           state.selectedSessionId = s.session_id;
           renderTable();
@@ -967,21 +1061,13 @@ def _render_dashboard_html(
         });
         bodyEl.appendChild(tr);
       }
-
-      if (!state.selectedSessionId && rows.length > 0) {
-        state.selectedSessionId = rows[0].session_id;
-        renderTable();
-        renderDetail();
-      }
-      if (rows.length === 0) {
-        detailEl.innerHTML = '<div class="subtle">No sessions match the current filters.</div>';
-      }
     }
 
     function renderDetail() {
       const s = byId.get(state.selectedSessionId);
       if (!s) {
-        detailEl.innerHTML = '<div class="subtle">No session selected.</div>';
+        panelEl.classList.remove('open');
+        detailEl.innerHTML = '';
         return;
       }
 
@@ -991,37 +1077,28 @@ def _render_dashboard_html(
       for (const step of boardProgression) {
         if (!step || !step.move) {
           if (!initialBoardHtml && step && step.board_text) {
-            initialBoardHtml = `
-              <details>
-                <summary>Initial board before the first move</summary>
-                ${renderBoardGrid(step.board_grid, step.board_text || '')}
-              </details>
-            `;
+            initialBoardHtml = `<details><summary>Initial board before the first move</summary>${renderBoardGrid(step.board_grid, step.board_text || '')}</details>`;
           }
           continue;
         }
         const turn = step.move.turn;
-        if (turn !== undefined && turn !== null && !boardByTurn.has(turn)) {
-          boardByTurn.set(turn, {
-            board_text: step.board_text || '',
-            board_grid: step.board_grid || null,
-          });
-        }
+        if (turn !== undefined && turn !== null && !boardByTurn.has(turn))
+          boardByTurn.set(turn, { board_text: step.board_text || '', board_grid: step.board_grid || null });
       }
 
       const moveRows = (s.moves || []).map((move) => {
-        const action = move.action || '-';
+        const action     = move.action || '-';
         const coordinate = move.coordinate || '-';
-        const reasoning = move.reasoning || '';
-        const changed = move.changed ? 'yes' : 'no';
-        const hitMine = move.hit_mine ? 'yes' : 'no';
-        const status = move.status_after || '-';
-        const error = move.error || '';
-        const failure = move.failure_category || '';
-        const prompt = move.prompt || '';
-        const output = move.model_output || '';
-        const turn = move.turn ?? '-';
-        const boardAfterTurn = boardByTurn.get(move.turn) || { board_text: '', board_grid: null };
+        const reasoning  = move.reasoning || '';
+        const changed    = move.changed   ? 'yes' : 'no';
+        const hitMine    = move.hit_mine  ? 'yes' : 'no';
+        const status     = move.status_after || '-';
+        const error      = move.error || '';
+        const failure    = move.failure_category || '';
+        const prompt     = move.prompt || '';
+        const output     = move.model_output || '';
+        const turn       = move.turn ?? '-';
+        const brd        = boardByTurn.get(move.turn) || { board_text: '', board_grid: null };
         return `
           <tr>
             <td>${escapeHtml(String(turn))}</td>
@@ -1034,16 +1111,16 @@ def _render_dashboard_html(
             <td>${escapeHtml(error || failure || '-')}</td>
           </tr>
           <tr>
-            <td colspan="7">
+            <td colspan="8">
               <div class="kv">Board after turn ${escapeHtml(String(turn))}</div>
-              ${renderBoardGrid(boardAfterTurn.board_grid, boardAfterTurn.board_text || '(unavailable)')}
+              ${renderBoardGrid(brd.board_grid, brd.board_text || '(unavailable)')}
             </td>
           </tr>
           <tr>
-            <td colspan="7">
+            <td colspan="8">
               <details>
                 <summary>Turn ${escapeHtml(String(turn))} prompt and output</summary>
-                <div class="kv">Parsed move recorded by evaluator: ${escapeHtml(String(action))} ${escapeHtml(String(coordinate))}</div>
+                <div class="kv">Parsed move: ${escapeHtml(String(action))} ${escapeHtml(String(coordinate))}</div>
                 <div class="io-grid">
                   <div class="io-card">
                     <div class="io-head prompt">Prompt sent to model</div>
@@ -1054,11 +1131,10 @@ def _render_dashboard_html(
                     <div class="code">${escapeHtml(output || '(none)')}</div>
                   </div>
                 </div>
-                <div class="kv">Parsed reasoning recorded by evaluator: ${escapeHtml(String(move.reasoning || '-'))}</div>
+                <div class="kv">Reasoning: ${escapeHtml(String(move.reasoning || '-'))}</div>
               </details>
             </td>
-          </tr>
-        `;
+          </tr>`;
       }).join('');
 
       detailEl.innerHTML = `
@@ -1075,22 +1151,36 @@ def _render_dashboard_html(
         ${initialBoardHtml}
         <div class="moves">
           <table>
+            <colgroup>
+              <col class="col-turn" /><col class="col-action" /><col class="col-coord" />
+              <col class="col-reason" /><col class="col-chg" /><col class="col-mine" />
+              <col class="col-status" /><col class="col-err" />
+            </colgroup>
             <thead>
-              <tr>
-                <th>Turn</th><th>Action</th><th>Coord</th><th>Reasoning</th><th>Changed</th><th>Hit Mine</th><th>Status</th><th>Error / Failure</th>
-              </tr>
+              <tr><th>Turn</th><th>Action</th><th>Coord</th><th>Reasoning</th><th>Changed</th><th>Hit Mine</th><th>Status</th><th>Error / Failure</th></tr>
             </thead>
-            <tbody>${moveRows || '<tr><td colspan="7">No move records.</td></tr>'}</tbody>
+            <tbody>${moveRows || '<tr><td colspan="8">No move records.</td></tr>'}</tbody>
           </table>
-        </div>
-      `;
+        </div>`;
+
+      panelEl.classList.add('open');
+      requestAnimationFrame(() => {
+        panelEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     }
 
     function wireEvents() {
-      searchEl.addEventListener('input', () => { state.search = searchEl.value; renderTable(); });
-      variantEl.addEventListener('change', () => { state.variant = variantEl.value; renderTable(); });
-      outcomeEl.addEventListener('change', () => { state.outcome = outcomeEl.value; renderTable(); });
-      failureEl.addEventListener('change', () => { state.failure = failureEl.value; renderTable(); });
+      searchEl.addEventListener('input',  () => { state.search  = searchEl.value;  renderTable(); });
+      variantEl.addEventListener('change',() => { state.variant = variantEl.value; renderTable(); });
+      outcomeEl.addEventListener('change',() => { state.outcome = outcomeEl.value; renderTable(); });
+      failureEl.addEventListener('change',() => { state.failure = failureEl.value; renderTable(); });
+
+      document.getElementById('close-detail').addEventListener('click', () => {
+        state.selectedSessionId = '';
+        panelEl.classList.remove('open');
+        detailEl.innerHTML = '';
+        renderTable();
+      });
 
       document.querySelectorAll('th[data-sort]').forEach((th) => {
         th.addEventListener('click', () => {
@@ -1111,7 +1201,6 @@ def _render_dashboard_html(
       buildSelectOptions();
       wireEvents();
       renderTable();
-      renderDetail();
     }
 
     init();
@@ -1119,7 +1208,12 @@ def _render_dashboard_html(
 </body>
 </html>
 """
-    return html_template.replace("__TITLE__", escaped_title).replace("__DATA_JSON__", data_json)
+    return (
+        html_template
+        .replace("__TITLE__", escaped_title)
+        .replace("__DATA_JSON__", data_json)
+        .replace("__RESULTS_URL__", escaped_results_url)
+    )
 
 
 def _now_iso() -> str:
