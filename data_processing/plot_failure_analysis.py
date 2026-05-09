@@ -16,7 +16,7 @@ from load_sessions import load_sessions, VARIANT_LABELS
 
 
 def plot_failure_turn(df: pd.DataFrame, output: Path | None = None) -> None:
-    """Violin/strip of move_count at end of session for losses."""
+    """Box plot of move_count at end of session for losses."""
     lost = df[~df["won"]].copy()
 
     fig, ax = plt.subplots(figsize=(14, 5))
@@ -30,9 +30,9 @@ def plot_failure_turn(df: pd.DataFrame, output: Path | None = None) -> None:
             categories=[VARIANT_LABELS[v] for v in variant_order if v in lost["variant_code"].unique()],
             ordered=True,
         )
-        sns.violinplot(data=lost, x="variant_label", y="move_count",
-                       inner="box", cut=0, palette="Reds", hue="variant_label",
-                       legend=False, ax=ax, linewidth=0.8)
+        sns.boxplot(data=lost, x="variant_label", y="move_count",
+                    palette="Reds", hue="variant_label",
+                    legend=False, ax=ax, linewidth=0.8, fliersize=4)
         sns.stripplot(data=lost, x="variant_label", y="move_count",
                       color="black", size=3, alpha=0.5, jitter=True, ax=ax, zorder=5)
 
