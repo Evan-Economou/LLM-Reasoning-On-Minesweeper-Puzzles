@@ -97,23 +97,23 @@ Contrary to the initial hypothesis that constraints that affected the board at a
 \section{Introduction}
 % (including the background, motivation, and goal)
 
-As large language models (LLMs) have grown in capability, the research community has increasingly turned to controlled, rule-governed environments to probe the boundary between genuine reasoning and sophisticated pattern-matching on training data. An interesting and unresolved question is whether LLMs reason from first principles, or whether the appearance of reasoning dissolves when a problem departs from the things seen during training~\cite{brown2020gpt3,wei2022emergent}. This concern is especially relevant for many existing benchmarks, which can inadvertently reward recall from training data rather than creativity~\cite{li2024minesweeper}.
+As large language models (LLMs) have grown in capability, the research community has increasingly turned to controlled, rule-governed environments to probe the boundary between genuine reasoning and sophisticated pattern-matching on training data. Often this is in pursuit of the interesting and ongoing question of to what extent language models can reason about concepts and processes that weren't explicitly included in training~\cite{brown2020gpt3,wei2022emergent}. This concern is especially relevant for many existing benchmarks, which can inadvertently reward recall from training data rather than creativity~\cite{li2024minesweeper}.
 
-One productive response has been to evaluate LLMs inside discrete game environments, where the rules are unambiguous, success is verifiable, and the action space is well-defined. Games provide a natural framework for this kind of evaluation. The formal rule structures of games allow researchers to construct novel configurations that are structurally similar to, but semantically distinct from, anything plausibly in an LLM's training data~\cite{liu2023agentbench,hu2025gamearena,seely2025sudoku}. Puzzle-based evaluations have extended this line of work to single-agent settings where logical deduction is the primary skill under examination. Xu et al.~\cite{xu2024puzzlesurvey} survey a range of such puzzle-based benchmarks and find that LLMs consistently struggle to maintain multi-step deductive chains, even when individual reasoning steps are within reach. A closely related study by Seely et al.~\cite{seely2025sudoku} used unconventional Sudoku variants as a test bed, selecting puzzles with novel interacting constraints specifically to defeat memorization; state-of-the-art models solved fewer than 15\% of puzzles unaided.
+One productive avenue of exploration has been to evaluate LLMs inside discrete game environments, where the rules are unambiguous, success is verifiable, and the action space is well-defined. The formal rule structures of games allow researchers to construct novel configurations that are structurally similar to, but semantically distinct from, anything plausibly in an LLM's training data~\cite{liu2023agentbench,hu2025gamearena,seely2025sudoku}. Puzzle-based evaluations have extended this line of work to single-agent settings where logical deduction is the primary skill under examination. Xu et al.~\cite{xu2024puzzlesurvey} survey a range of such puzzle-based benchmarks and find that LLMs consistently struggle to maintain multi-step deductive chains, even when individual reasoning steps are within reach. A closely related study by Seely et al.~\cite{seely2025sudoku} used unconventional Sudoku variants as a test bed, selecting puzzles with novel interacting constraints specifically to defeat memorization; state-of-the-art models solved fewer than 15\% of puzzles unaided.
 
-Minesweeper is a particularly appealing evaluation domain because it can be formalized as a constraint satisfaction problem~\cite{studholme2001minesweeper}, its rules are compact and unambiguous, and the gap between understanding a rule and correctly applying it across an evolving board state is large enough to expose meaningful differences in reasoning quality. Prior work has taken this gamification of benchmarks and examined Minesweeper specifically. Li et al.~\cite{li2024minesweeper} conducted experiments with GPT-3.5 and GPT-4, finding that the models were able to understand individual board states and identify which cells a numeric clue constrained, but struggled to chain those inferences into a coherent multi-step solving strategy. That study also identified a tendency for LLMs to produce sequences of actions that are locally plausible but globally incoherent, behaving more like a heuristic search than a principled deduction.
+Minesweeper is a particularly appealing evaluation domain because it can be formalized as a well defined constraint satisfaction problem~\cite{studholme2001minesweeper}, its rules are compact and unambiguous, and the gap between understanding a rule and correctly applying it across an evolving board state is large enough to expose meaningful differences in reasoning quality. Prior work has taken this gamification of benchmarks and examined Minesweeper specifically. Li et al.~\cite{li2024minesweeper} conducted experiments with GPT-3.5 and GPT-4, finding that the models were able to understand individual board states and identify which cells a numeric clue constrained, but struggled to chain those inferences into a coherent multi-step solving strategy. That study also identified a tendency for LLMs to produce sequences of actions that are locally plausible but globally incoherent, behaving more like a heuristic search than a true deduction.
 
-The present paper builds on this prior work by asking a different question: rather than varying board difficulty or size, what happens when the rules themselves are modified? I utilize twelve Minesweeper variants drawn from the game \textit{14~Minesweeper Variants}~\cite{artlessgames2022minesweeper} and organized into two categories: structural variants, which impose additional constraints on where mines may appear but leave clue semantics intact, and clue-modifier variants, which change what the displayed numeric values mean. This design isolates two distinct competencies. The first is the ability to incorporate additional global constraints while still applying familiar deductive patterns, a capacity for additive reasoning under rule augmentation. The second is the ability to fully reinterpret a learned symbol system when its semantics change, the capacity for semantic recalibration that goes beyond adding information to an existing framework.
+This paper builds on this prior work by asking a different question: rather than varying board difficulty or size, what happens to the model's ability to reason when the rules themselves are modified? I utilize twelve Minesweeper variants drawn from the game \textit{14~Minesweeper Variants}~\cite{artlessgames2022minesweeper} and organized into two categories: structural variants, which impose additional constraints on where mines may appear but leave clue semantics intact, and clue-modifier variants, which change what the displayed numeric values mean. This design attempts to isolates two main distinct competencies. The first is the ability to incorporate additional global constraints while still applying familiar deductive patterns, a capacity for additive reasoning under rule augmentation. The second is the ability to fully reinterpret a learned symbol system when its semantics change, the capacity for semantic recalibration that goes beyond adding information to an existing framework.
 
-My findings reveal a stark asymmetry between these two competency classes. \texttt{claude-haiku-4-5}, evaluated via the Anthropic API with extended thinking enabled, achieved win rates of $60\%-86\%$ across most structural variants but $0\%$ on all three clue-modifier variants. Losses in the clue-modifier condition were not gradual: in the Liar and Partition variants, the model hit a mine on virtually every first move, performing worse than a random agent.
-Analysis of the extended thinking traces shows that the model could reproduce the variant rule when prompted but then reasoned from standard Minesweeper semantics anyway, suggesting that surface-level rule comprehension does not propagate into the underlying inference procedure when the variant directly conflicts with a well-learned pattern.
+My findings reveal a stark asymmetry between these two types of reasoning. \texttt{claude-haiku-4-5}, evaluated via the Anthropic API with extended thinking enabled, achieved win rates up to $60\%-86\%$ across most structural variants but $0\%$ on all three clue-modifier variants. Losses in the clue-modifier condition were not gradual, and in the Liar and Partition variants the model hit a mine on nearly every first move, performing worse than a random agent.
+Examination of the extended thinking traces shows that the model could reproduce the variant rule when prompted but then reasoned from standard Minesweeper semantics anyway, suggesting that surface-level rule comprehension does not propagate into the underlying inference procedure when the variant directly conflicts with a well-learned pattern.
 
 This paper presents two primary contributions:
 \begin{enumerate}
-    \item A controlled evaluation framework using twelve Minesweeper rule variants
+    \item A puzzle-based evaluation framework using twelve Minesweeper rule variants
           that cleanly separates structural rule augmentation from semantic rule
           substitution as sources of difficulty for LLMs.
-    \item Empirical evidence that LLMs are significantly more robust to additive
+    \item Evidence towards the idea that LLMs are more robust to additive
           structural constraints than to modifications of familiar symbol semantics,
           with implications for how reasoning benchmarks should be designed.
 \end{enumerate}
@@ -136,7 +136,7 @@ Using these rules, standard minesweeper can be formulated as a constraint satisf
 The board variants in this study are drawn from the game \textit{14 Minesweeper
 Variants} ~\cite{artlessgames2022minesweeper} and organized into two broad categories.
 
-\textbf{Structural (placement) constraints} modify where mines may appear but leave
+\textbf{Structural (placement) constraints}, as seen in Table \ref{tab:structural} modify where mines may appear but leave
 the clue values unchanged. The revealed number on a cell still counts mines in the
 standard eight-cell neighborhood.
 \begin{table}[htp]
@@ -158,10 +158,11 @@ H & Horiz     & No two mines touch horizontally \\
 \end{tabularx}
 \vspace{1pt}
 \caption{Structural constraint variants. Clue semantics unchanged.}
+\label{tab:structural}
+
 \end{table}
 
-\textbf{Clue-modifier variants} change what the numeric value displayed on a revealed
-cell means. The player must reinterpret numbers according to the variant's semantics.
+\textbf{Clue-modifier variants}, as seen in Table \ref{tab:cluemod}, change what the numeric value displayed on a revealed cell means. The player must reinterpret numbers according to the variant's semantics.
 
 \begin{table}[htp]
 \centering
@@ -176,8 +177,9 @@ X & Cross     & Clue counts mines in a plus-shaped cross region extending 2 cell
 \bottomrule
 \end{tabularx}
 \vspace{1pt}
-
 \caption{Clue-modifier variants. The same tokens carry different semantic meanings.}
+\label{tab:cluemod}
+
 \end{table}
 
 Standard Minesweeper (STD) serves as the control condition, including no extra rules.
@@ -205,7 +207,7 @@ configuration:
   \item \textbf{Turn prompt:} Current board state, turn number, and the full action
         history of prior turns.
   \item \textbf{Action format:} Action: REVEAL (row,col) or
-        Action: FLAG (row,col), followed by Reasoning: <one sentence>.
+        Action: FLAG (row,col), followed by Reasoning: $<$one sentence$>$.
         The model's extended thinking block contains its full reasoning trace.
   \item \textbf{Turn limit:} Three times the number of moves the deterministic solver
         required for that puzzle. Sessions exhausting the budget without a win or loss
@@ -289,15 +291,15 @@ A representative losing session shows the following reasoning from the model on 
 are both `.' (zero mines). Therefore (5,3) must be safe to reveal.''}
 \end{quote}
 
-The model's logical inference is correct under standard Minesweeper semantics: a cell
+The model's logical inference is correct under standard Minesweeper semantics where a cell
 adjacent only to zeros is safe. But in the Liar variant, displayed zeros are actually
 $1$s (one true adjacent mine), so the inference is systematically wrong. The
-model reveals cell (5,3), which contains a mine. This occurs on the very first move
-in every Liar session, with no variance.
+model reveals cell (5,3), which contains a mine. A pattern mirroring this one occurs on the very first move
+in every Liar session, with no variance in this small sample.
 
 The session log shows the model explicitly referencing the Liar variant rule in the
 system prompt but then reasoning from standard clue semantics anyway. The rule
-description is comprehended at the surface level (the model can reproduce it), but it
+description appears to be comprehended at the surface level (the model can reproduce it), but it
 does not propagate into the underlying inference procedure.
 
 \section{Discussion}
@@ -306,10 +308,10 @@ My initial hypothesis was that global structural constraints on the orientation 
 
 The data shows a pattern in the direct opposite direction. Global structural constraints (D, S, R, O, T) result in moderate to good performance overall, though displaying some variance with such a small sample, while variants that modify the clues themselves (L, P, X) result in total failure. The structural variants add information that restrict mine placement, but the model was still able to make significant progress by applying default minesweeper logic to a puzzle that happens to not require heavy consideration of the constraint. However, observing some of the reasoning given the model was still considering these variants in many cases, and simply wasn't able to effectively utilize them to succeed.
 
-The clue modifier variants by contrast, actually strongly penalize ignoring the variant and only using standard logic.
+In contrast to this, the variants that modify the semantic understanding of what the numeric clues are strongly penalize ignoring the variant and only using standard logic, and this is clearly demonstrated in the results.
 
 \subsection{Why Liar and Partition Are Worse Than Random}
-One of the most interesting results from this testing is that the performance on variants Liar and Partition is a lot worse than random chance. On a $5\times5$ board with 5 mines, there is a $20\%$ chance of hitting a mine if all squares are hidden. This goes up with the initially given revealed squares, but is only ever $100\%$ when the game is in a completed state with every safe space revealed. This result may have been a result of the system prompt continuing to describe the game as 'Minesweeper', despite not following traditional rules, which led to incorrect assumptions that took precedent over the consideration of the variant. However, it strengthens the argument that LLMs perform well on tasks that involve incorporating additional information, but don't yet have the cognitive flexibility to fully recalibrate themselves away from a well learned pattern\cite{xu2024puzzlesurvey}.
+One of the most interesting results from this testing is that the performance on variants Liar and Partition is a lot worse than random chance. On a $5\times5$ board with 5 mines, there is a $20\%$ chance of hitting a mine if all squares are hidden. This goes up with the initially given revealed squares, but is only ever $100\%$ when the game is in a completed state with every safe space revealed. This result may have been a result of the system prompt continuing to describe the game as `Minesweeper', despite not following traditional rules, which led to incorrect assumptions that took precedent over the consideration of the variant. However, it strengthens the argument that LLMs perform well on tasks that involve incorporating additional information, but don't yet have the cognitive flexibility to fully recalibrate themselves away from a well learned pattern\cite{xu2024puzzlesurvey}.
 
 \subsection{What the Model Got Right}
 The variants that the model succeeded best with were those that changed the puzzle the least. Variants like Dual or Snake were examples of this, variants that enforced a structure on the mines but ultimately still allowing the model to succeed using mostly standard Minesweeper logic. Though some of the reasoning responses of the model do cite the variant (talking about things like the location of the snake of mines), the majority of successful turns taken during these puzzles appeared to be mostly related to standard logic.
@@ -317,8 +319,8 @@ The variants that the model succeeded best with were those that changed the puzz
 One of the most interesting plots to come out of these experiments is Figure 3, which depicts the proportion of REVEAL actions in comparison to FLAG actions. In particular, I want to note the extremely low proportion of FLAG actions taken for the Snake variant, despite the very low hit rate as shown in Table 3. This result indicates that the model successfully identified that the goal of the puzzle is not to flag mines, but to reveal every safe space, and was capable of tracking the puzzle state well enough to not require mine flags to reach a solution. As a human Minesweeper player, this pattern fascinates me, because often while playing the game myself or watching others play the game, it is extremely difficult to succeed without an indication of previously completed logical deductions.
 
 \subsection{Implications for Design}
-Though this paper represents a toy task on a weak model without a massive sample size, the results do seem to have general implications for reasoning benchmarks. Though these variants are all applied in the same general pipeline, the evaluations that modified semantic meaning seemed to test a different enough capability that this isn't the best way to test capabilities like this, and that further customization is needed.
-Reassigning meaning to familiar symbols is difficult to do in the prompt space, especially while referencing tasks the model is familiar with, and traditional fine tuning may be necessary to achieve strong results.
+Though this paper represents a toy task on a weak model without a massive sample size, the results do seem to have general implications for reasoning benchmarks. These variants are all applied in the same general pipeline, but the evaluations that modified semantic meaning seemed to test a different enough capability that this isn't the best way to test capabilities like this, and that further customization is needed.
+Reassigning meaning to familiar symbols is difficult to do in the prompt space, especially while referencing tasks the model is familiar with, 
 
 
 \section{Limitations}
@@ -345,9 +347,9 @@ The clearest takeaway is a distinction between two types of rule adaptation:
         into mines.
 \end{itemize}
 
-This distinction may generalize beyond Minesweeper, implying that tasks that ask an LLM to fully reinterpret something it has come to understand well may be less successful than tasks that add new information to familiar tasks \cite{xu2024puzzlesurvey}.
+This distinction may generalize beyond Minesweeper, implying that tasks that ask an LLM to fully reinterpret something it has come to understand well may be less successful than tasks that add new information to familiar tasks \cite{xu2024puzzlesurvey}, and it is useful to build off of known tasks carefully.
 
-Future work should primarily focus on a few key areas for exploration. The first of those is to utilize a stronger model, like Sonnet or Opus, to see if they fall into the same trap of not being able to effectively internalize the rules that change clue semantics. In addition, it would be interesting to see how model performance changes based on grid size. Do the emergent reasoning capabilities that allow success on a standard puzzle hold for a $10\times10$ board? A $100\times100$ board? Additionally, the manner in which the present board is communicated to the model is a possible variable to be examined. If the model can still make the connection of an implicit coordinate structure based purely on a list of characters and row numbers separated by commas, that would be another skill that is interesting to measure. Finally, additional work into the system prompt may alter the results described here. Things like having the model recite the variant rule back during each turn might improve results.
+Future work should primarily focus on a few key areas for exploration. The first of those is to utilize a stronger model, like Anthropic's Sonnet or Opus, to see if they fall into the same trap of not being able to effectively internalize the rules that change clue semantics. In addition, it would be interesting to see how model performance changes based on grid size. Do the emergent reasoning capabilities that allow success on a standard puzzle hold for a $10\times10$ board? A $100\times100$ board? Additionally, the manner in which the present board is communicated to the model is a possible variable to be examined. If the model can still make the connection of an implicit coordinate structure based purely on a list of characters and row numbers separated by commas, that indicate another skill that is interesting to measure. Finally, additional work into the system prompt may alter the results described here. Things like having the model recite the variant rule back during each turn might improve results.
 
 % trigger a \newpage just before the given reference
 % number - used to balance the columns on the last page
