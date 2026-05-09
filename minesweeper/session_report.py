@@ -19,6 +19,13 @@ else:
 
 _BOARD_ENCODER = TextBoardEncoder()
 
+_VARIANT_ORDER = ["STD", "Q", "C", "T", "O", "D", "S", "R", "H", "P", "L", "X"]
+_VARIANT_LABELS = {
+    "STD": "Standard", "Q": "Quad", "C": "Connected", "T": "Triplet",
+    "O": "Outside", "D": "Dual", "S": "Snake", "R": "RowCol",
+    "H": "Horizontal", "P": "Partition", "L": "Liar", "X": "Cross",
+}
+
 
 def build_session_dashboard(
     input_paths: list[str],
@@ -71,11 +78,13 @@ def build_session_dashboard(
     if results_path is not None:
         figures_dir = path.parent / "figures"
         descriptions_path = _find_descriptions_file(path)
+        player_stats = _compute_player_stats(normalized)
         results_html = _render_results_html(
             title=title,
             figures_dir=figures_dir,
             descriptions_path=descriptions_path,
             dashboard_url=path.name,
+            player_stats=player_stats,
         )
         results_path.parent.mkdir(parents=True, exist_ok=True)
         results_path.write_text(results_html, encoding="utf-8")
@@ -272,6 +281,56 @@ def _build_summary(sessions: list[dict]) -> dict[str, int]:
     return summary
 
 
+def _compute_player_stats(sessions: list[dict]) -> dict[str, list[dict]]:
+    from collections import defaultdict
+
+    data: dict = defaultdict(lambda: defaultdict(lambda: {
+        "move_counts": [], "wins": 0, "reveals": 0, "mine_hits": 0,
+    }))
+
+    for s in sessions:
+        pid = s.get("player_id", "")
+        vc = s.get("variant_code", "")
+        bucket = data[pid][vc]
+        bucket["move_counts"].append(int(s.get("move_count") or 0))
+        if s.get("won"):
+            bucket["wins"] += 1
+        for move in s.get("moves", []):
+            if str(move.get("action") or "").upper() == "REVEAL":
+                bucket["reveals"] += 1
+                if move.get("hit_mine"):
+                    bucket["mine_hits"] += 1
+
+    result: dict[str, list[dict]] = {}
+    for pid, variants in data.items():
+        ordered = [v for v in _VARIANT_ORDER if v in variants]
+        ordered += sorted(v for v in variants if v not in _VARIANT_ORDER)
+        rows = []
+        for vc in ordered:
+            bucket = variants[vc]
+            counts = bucket["move_counts"]
+            n = len(counts)
+            wins = bucket["wins"]
+            mean_moves = sum(counts) / n if n > 0 else 0.0
+            sorted_c = sorted(counts)
+            mid = n // 2
+            median_moves = sorted_c[mid] if n % 2 == 1 else (sorted_c[mid - 1] + sorted_c[mid]) / 2
+            rc = bucket["reveals"]
+            mine_hit_rate = round(bucket["mine_hits"] / rc * 100, 1) if rc > 0 else None
+            rows.append({
+                "variant": vc,
+                "label": _VARIANT_LABELS.get(vc, vc),
+                "n": n,
+                "wins": wins,
+                "win_rate": round(wins / n * 100, 1) if n > 0 else 0.0,
+                "mean_moves": round(mean_moves, 1),
+                "median_moves": int(round(median_moves)),
+                "mine_hit_rate": mine_hit_rate,
+            })
+        result[pid] = rows
+    return result
+
+
 def _find_descriptions_file(output_path: Path) -> Path | None:
     candidates = [
         output_path.parent.parent / "data_processing" / "plots_description.md",
@@ -340,6 +399,7 @@ def _render_results_html(
     figures_dir: Path,
     descriptions_path: Path | None,
     dashboard_url: str = "index.html",
+    player_stats: dict | None = None,
 ) -> str:
     plots: list[dict[str, str]] = []
     if descriptions_path and descriptions_path.exists():
@@ -383,6 +443,76 @@ def _render_results_html(
     cards_html = "\n".join(card_parts) if card_parts else '<p style="color:#5c6b64;">No figures found.</p>'
     esc_title = html.escape(title)
     esc_dash = html.escape(dashboard_url)
+
+    stats_json = json.dumps(player_stats or {}, ensure_ascii=True).replace("</", "<\\/")
+    stats_section_html = (
+        '<section style="margin-top:20px;">'
+        '<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;">'
+        '<div style="padding:12px 16px;border-bottom:1px solid var(--line);background:#f8f3e9;'
+        'display:flex;align-items:center;gap:12px;flex-wrap:wrap;">'
+        '<span style="font-size:16px;font-weight:bold;">Per-Player Statistics</span>'
+        '<select id="player-select" style="border:1px solid #c5bcae;border-radius:8px;'
+        'padding:6px 10px;background:#fff;color:var(--ink);font-size:14px;font-family:inherit;"></select>'
+        '</div>'
+        '<div style="overflow:auto;">'
+        '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
+        '<thead><tr>'
+        '<th style="padding:9px;text-align:left;background:#f8f3e9;border-bottom:1px solid var(--line);">Variant</th>'
+        '<th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">n</th>'
+        '<th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Wins</th>'
+        '<th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Win Rate</th>'
+        '<th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Mean Moves</th>'
+        '<th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Median Moves</th>'
+        '<th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Mine Hit Rate</th>'
+        '</tr></thead>'
+        '<tbody id="player-stats-body"></tbody>'
+        '</table></div></div></section>'
+    )
+    _stats_js_body = (
+        '\n(function() {\n'
+        '  var playerStats = JSON.parse(document.getElementById("player-stats-data").textContent);\n'
+        '  var players = Object.keys(playerStats).sort();\n'
+        '  var sel = document.getElementById("player-select");\n'
+        '  var tbody = document.getElementById("player-stats-body");\n'
+        '  function esc(v) {\n'
+        '    return String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");\n'
+        '  }\n'
+        '  function render(pid) {\n'
+        '    var rows = playerStats[pid] || [];\n'
+        '    var h = "";\n'
+        '    for (var i = 0; i < rows.length; i++) {\n'
+        '      var r = rows[i];\n'
+        '      var mhr = (r.mine_hit_rate !== null && r.mine_hit_rate !== undefined) ? r.mine_hit_rate + "%" : "\\u2014";\n'
+        '      h += "<tr>"\n'
+        '        + \'<td style="padding:8px 9px;border-top:1px solid #efe7d8;">\' + esc(r.label || r.variant) + "</td>"\n'
+        '        + \'<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">\' + r.n + "</td>"\n'
+        '        + \'<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">\' + r.wins + "</td>"\n'
+        '        + \'<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">\' + r.win_rate + "%" + "</td>"\n'
+        '        + \'<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">\' + r.mean_moves + "</td>"\n'
+        '        + \'<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">\' + r.median_moves + "</td>"\n'
+        '        + \'<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">\' + mhr + "</td>"\n'
+        '        + "</tr>";\n'
+        '    }\n'
+        '    tbody.innerHTML = h;\n'
+        '  }\n'
+        '  for (var j = 0; j < players.length; j++) {\n'
+        '    var opt = document.createElement("option");\n'
+        '    opt.value = players[j];\n'
+        '    opt.textContent = players[j];\n'
+        '    sel.appendChild(opt);\n'
+        '  }\n'
+        '  if (players.length > 0) render(players[0]);\n'
+        '  sel.addEventListener("change", function() { render(sel.value); });\n'
+        '  if (players.length <= 1) sel.style.display = "none";\n'
+        '})();\n'
+    )
+    stats_js = (
+        '<script id="player-stats-data" type="application/json">'
+        + stats_json
+        + '</script>\n<script>'
+        + _stats_js_body
+        + '</script>'
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -451,8 +581,10 @@ def _render_results_html(
       <h1>{esc_title}</h1>
       <div class="subtle">Results &amp; Analysis — Figures and Interpretations</div>
     </section>
+    {stats_section_html}
     {cards_html}
   </div>
+  {stats_js}
 </body>
 </html>"""
 
@@ -865,7 +997,6 @@ def _render_dashboard_html(
               <th data-sort="variant_code">Variant</th>
               <th data-sort="move_count">Moves</th>
               <th data-sort="duration_seconds">Duration</th>
-              <th data-sort="failure_category">Failure</th>
               <th data-sort="outcome">Outcome</th>
             </tr>
           </thead>
@@ -1052,7 +1183,6 @@ def _render_dashboard_html(
           <td>${escapeHtml(s.variant_code || '-')}</td>
           <td>${escapeHtml(String(s.move_count || 0))}</td>
           <td>${escapeHtml(fmtSeconds(s.duration_seconds || 0))}</td>
-          <td>${escapeHtml(s.failure_category || '-')}</td>
           <td><span class="pill ${cls}">${escapeHtml(outcome)}</span></td>`;
         tr.addEventListener('click', () => {
           state.selectedSessionId = s.session_id;

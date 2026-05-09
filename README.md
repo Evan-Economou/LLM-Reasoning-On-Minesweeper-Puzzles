@@ -132,8 +132,12 @@ Build an HTML dashboard from one or more session logs:
 
 ```bash
 python -m minesweeper session-report \
-  --input datasets/model_sessions.jsonl datasets/control_sessions.jsonl datasets/human_sessions.jsonl \
-  --output datasets/session_dashboard.html
+  --input docs/results/control_sessions.jsonl \
+          docs/results/haiku_pilot_sessions.jsonl \
+          docs/results/haiku_pilot_sessions_1.jsonl \
+          docs/results/haiku_cot_sessions.jsonl \
+          docs/results/haiku_cot_sessions_old.jsonl \
+  --output docs/index.html
 ```
 
 ## Data Analysis

@@ -65,6 +65,7 @@
       <h1>LLM Minesweeper Benchmark</h1>
       <div class="subtle">Results &amp; Analysis — Figures and Interpretations</div>
     </section>
+    <section style="margin-top:20px;"><div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;"><div style="padding:12px 16px;border-bottom:1px solid var(--line);background:#f8f3e9;display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><span style="font-size:16px;font-weight:bold;">Per-Player Statistics</span><select id="player-select" style="border:1px solid #c5bcae;border-radius:8px;padding:6px 10px;background:#fff;color:var(--ink);font-size:14px;font-family:inherit;"></select></div><div style="overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr><th style="padding:9px;text-align:left;background:#f8f3e9;border-bottom:1px solid var(--line);">Variant</th><th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">n</th><th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Wins</th><th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Win Rate</th><th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Mean Moves</th><th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Median Moves</th><th style="padding:9px;text-align:right;background:#f8f3e9;border-bottom:1px solid var(--line);">Mine Hit Rate</th></tr></thead><tbody id="player-stats-body"></tbody></table></div></div></section>
     
     <div class="fig-card">
       <div class="fig-card-title">Win Rate by Variant</div>
@@ -166,5 +167,44 @@
       </div>
     </div>
   </div>
+  <script id="player-stats-data" type="application/json">{"haiku_cot": [{"variant": "STD", "label": "Standard", "n": 7, "wins": 6, "win_rate": 85.7, "mean_moves": 6.1, "median_moves": 8, "mine_hit_rate": 4.0}, {"variant": "Q", "label": "Quad", "n": 5, "wins": 0, "win_rate": 0.0, "mean_moves": 3.4, "median_moves": 3, "mine_hit_rate": 33.3}, {"variant": "C", "label": "Connected", "n": 5, "wins": 1, "win_rate": 20.0, "mean_moves": 4.8, "median_moves": 4, "mine_hit_rate": 17.4}, {"variant": "T", "label": "Triplet", "n": 5, "wins": 3, "win_rate": 60.0, "mean_moves": 4.2, "median_moves": 4, "mine_hit_rate": 13.3}, {"variant": "O", "label": "Outside", "n": 5, "wins": 3, "win_rate": 60.0, "mean_moves": 3.0, "median_moves": 3, "mine_hit_rate": 16.7}, {"variant": "D", "label": "Dual", "n": 5, "wins": 4, "win_rate": 80.0, "mean_moves": 7.2, "median_moves": 7, "mine_hit_rate": 3.6}, {"variant": "S", "label": "Snake", "n": 6, "wins": 4, "win_rate": 66.7, "mean_moves": 4.8, "median_moves": 4, "mine_hit_rate": 7.1}, {"variant": "R", "label": "RowCol", "n": 6, "wins": 4, "win_rate": 66.7, "mean_moves": 8.5, "median_moves": 8, "mine_hit_rate": 5.6}, {"variant": "H", "label": "Horizontal", "n": 5, "wins": 2, "win_rate": 40.0, "mean_moves": 3.2, "median_moves": 3, "mine_hit_rate": 20.0}, {"variant": "P", "label": "Partition", "n": 5, "wins": 0, "win_rate": 0.0, "mean_moves": 1.2, "median_moves": 1, "mine_hit_rate": 100.0}, {"variant": "L", "label": "Liar", "n": 5, "wins": 0, "win_rate": 0.0, "mean_moves": 1.2, "median_moves": 1, "mine_hit_rate": 100.0}, {"variant": "X", "label": "Cross", "n": 5, "wins": 0, "win_rate": 0.0, "mean_moves": 2.6, "median_moves": 3, "mine_hit_rate": 62.5}], "haiku_pilot": [{"variant": "STD", "label": "Standard", "n": 13, "wins": 0, "win_rate": 0.0, "mean_moves": 1.2, "median_moves": 1, "mine_hit_rate": 81.2}, {"variant": "Q", "label": "Quad", "n": 13, "wins": 0, "win_rate": 0.0, "mean_moves": 1.6, "median_moves": 1, "mine_hit_rate": 47.6}, {"variant": "C", "label": "Connected", "n": 13, "wins": 0, "win_rate": 0.0, "mean_moves": 1.8, "median_moves": 1, "mine_hit_rate": 54.5}, {"variant": "T", "label": "Triplet", "n": 12, "wins": 0, "win_rate": 0.0, "mean_moves": 1.2, "median_moves": 1, "mine_hit_rate": 78.6}, {"variant": "O", "label": "Outside", "n": 1, "wins": 0, "win_rate": 0.0, "mean_moves": 1.0, "median_moves": 1, "mine_hit_rate": 100.0}, {"variant": "D", "label": "Dual", "n": 1, "wins": 0, "win_rate": 0.0, "mean_moves": 1.0, "median_moves": 1, "mine_hit_rate": 100.0}, {"variant": "S", "label": "Snake", "n": 1, "wins": 0, "win_rate": 0.0, "mean_moves": 5.0, "median_moves": 5, "mine_hit_rate": 20.0}, {"variant": "R", "label": "RowCol", "n": 1, "wins": 0, "win_rate": 0.0, "mean_moves": 1.0, "median_moves": 1, "mine_hit_rate": 0.0}, {"variant": "H", "label": "Horizontal", "n": 1, "wins": 0, "win_rate": 0.0, "mean_moves": 1.0, "median_moves": 1, "mine_hit_rate": 100.0}, {"variant": "P", "label": "Partition", "n": 1, "wins": 0, "win_rate": 0.0, "mean_moves": 1.0, "median_moves": 1, "mine_hit_rate": 100.0}, {"variant": "L", "label": "Liar", "n": 1, "wins": 0, "win_rate": 0.0, "mean_moves": 1.0, "median_moves": 1, "mine_hit_rate": 100.0}, {"variant": "X", "label": "Cross", "n": 1, "wins": 0, "win_rate": 0.0, "mean_moves": 4.0, "median_moves": 4, "mine_hit_rate": 25.0}], "deterministic_solver": [{"variant": "STD", "label": "Standard", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 8.7, "median_moves": 9, "mine_hit_rate": 0.0}, {"variant": "Q", "label": "Quad", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 15.4, "median_moves": 15, "mine_hit_rate": 0.0}, {"variant": "C", "label": "Connected", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 13.8, "median_moves": 12, "mine_hit_rate": 0.0}, {"variant": "T", "label": "Triplet", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 10.8, "median_moves": 10, "mine_hit_rate": 0.0}, {"variant": "O", "label": "Outside", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 13.2, "median_moves": 11, "mine_hit_rate": 0.0}, {"variant": "D", "label": "Dual", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 13.7, "median_moves": 13, "mine_hit_rate": 0.0}, {"variant": "S", "label": "Snake", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 22.6, "median_moves": 23, "mine_hit_rate": 0.0}, {"variant": "R", "label": "RowCol", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 15.1, "median_moves": 16, "mine_hit_rate": 0.0}, {"variant": "H", "label": "Horizontal", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 12.0, "median_moves": 11, "mine_hit_rate": 0.0}, {"variant": "P", "label": "Partition", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 8.7, "median_moves": 8, "mine_hit_rate": 0.0}, {"variant": "L", "label": "Liar", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 9.1, "median_moves": 9, "mine_hit_rate": 0.0}, {"variant": "X", "label": "Cross", "n": 50, "wins": 50, "win_rate": 100.0, "mean_moves": 11.5, "median_moves": 11, "mine_hit_rate": 0.0}]}</script>
+<script>
+(function() {
+  var playerStats = JSON.parse(document.getElementById("player-stats-data").textContent);
+  var players = Object.keys(playerStats).sort();
+  var sel = document.getElementById("player-select");
+  var tbody = document.getElementById("player-stats-body");
+  function esc(v) {
+    return String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+  function render(pid) {
+    var rows = playerStats[pid] || [];
+    var h = "";
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var mhr = (r.mine_hit_rate !== null && r.mine_hit_rate !== undefined) ? r.mine_hit_rate + "%" : "\u2014";
+      h += "<tr>"
+        + '<td style="padding:8px 9px;border-top:1px solid #efe7d8;">' + esc(r.label || r.variant) + "</td>"
+        + '<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">' + r.n + "</td>"
+        + '<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">' + r.wins + "</td>"
+        + '<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">' + r.win_rate + "%" + "</td>"
+        + '<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">' + r.mean_moves + "</td>"
+        + '<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">' + r.median_moves + "</td>"
+        + '<td style="padding:8px 9px;border-top:1px solid #efe7d8;text-align:right;">' + mhr + "</td>"
+        + "</tr>";
+    }
+    tbody.innerHTML = h;
+  }
+  for (var j = 0; j < players.length; j++) {
+    var opt = document.createElement("option");
+    opt.value = players[j];
+    opt.textContent = players[j];
+    sel.appendChild(opt);
+  }
+  if (players.length > 0) render(players[0]);
+  sel.addEventListener("change", function() { render(sel.value); });
+  if (players.length <= 1) sel.style.display = "none";
+})();
+</script>
 </body>
 </html>
